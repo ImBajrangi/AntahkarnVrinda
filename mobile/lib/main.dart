@@ -7,7 +7,6 @@ import 'package:file_picker/file_picker.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'services/p2p_service.dart';
 import 'models/peer.dart';
-import 'widgets/transfer_dialog.dart';
 import 'widgets/radar_painter.dart';
 
 void main() {
@@ -176,9 +175,10 @@ class _MainLayoutState extends State<MainLayout> {
                 if (result != null) {
                   List<File> files =
                       result.paths.map((path) => File(path!)).toList();
+                  if (!context.mounted) return;
                   ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                        content: Text('Starting transfer to ${peer.name}...'),
+                    const SnackBar(
+                        content: Text('Starting transfer...'),
                         backgroundColor: Colors.black),
                   );
                   _p2p.sendFiles(files, peer);
@@ -249,7 +249,8 @@ class RadarView extends StatelessWidget {
             children: [
               Center(
                 child: CustomPaint(
-                  painter: RadarPainter(color: Colors.black.withOpacity(0.05)),
+                  painter:
+                      RadarPainter(color: Colors.black.withValues(alpha: 0.05)),
                   size: const Size(double.infinity, double.infinity),
                 ),
               ),
@@ -531,10 +532,10 @@ class SettingsView extends StatelessWidget {
         ),
         const SizedBox(height: 24),
         // Simplified settings for now
-        ListTile(
-          title: const Text('Device Name'),
-          subtitle: const Text('MOBILE-NODE'),
-          trailing: const Icon(Icons.edit),
+        const ListTile(
+          title: Text('Device Name'),
+          subtitle: Text('MOBILE-NODE'),
+          trailing: Icon(Icons.edit),
         ),
         SwitchListTile(
           title: const Text('Visible to others'),
@@ -751,7 +752,7 @@ class _SharedViewState extends State<SharedView> {
             ),
           ),
           const SizedBox(width: 8),
-          Container(
+          SizedBox(
             height: 32,
             child: OutlinedButton(
               onPressed: () {},

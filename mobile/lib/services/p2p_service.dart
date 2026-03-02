@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:nsd/nsd.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' as foundation;
 import '../models/peer.dart';
 
 class P2pService {
@@ -13,7 +14,6 @@ class P2pService {
   final _peersController = StreamController<List<Peer>>.broadcast();
   Stream<List<Peer>> get peersStream => _peersController.stream;
 
-  final Map<String, Peer> _discoveredPeers = {};
   Registration? _registration;
   Discovery? _discovery;
   io.Socket? _socket;
@@ -112,5 +112,5 @@ class P2pService {
   }
 }
 
-// Helper for logging since 'foundation' might not be imported
-void debugPrint(String msg) => print('[P2P] $msg');
+// Helper for logging using foundation's debugPrint
+void debugPrint(String msg) => foundation.debugPrint('[P2P] $msg');

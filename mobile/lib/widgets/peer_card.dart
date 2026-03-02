@@ -27,7 +27,7 @@ class PeerCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(4),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(0.05),
+              color: Colors.black.withValues(alpha: 0.05),
               offset: const Offset(2, 2),
               blurRadius: 0,
             ),
@@ -55,7 +55,8 @@ class PeerCard extends StatelessWidget {
                       value: progress / 100,
                       strokeWidth: 6,
                       backgroundColor: const Color(0xFFF7F7F5),
-                      valueColor: const AlwaysStoppedAnimation<Color>(Colors.black),
+                      valueColor:
+                          const AlwaysStoppedAnimation<Color>(Colors.black),
                     ),
                   ),
                   Column(
@@ -143,6 +144,6 @@ class PeerCard extends StatelessWidget {
       default:
         iconData = Icons.laptop;
     }
-    return Icon(iconData, size: 40, color: Colors.black.withOpacity(0.7));
+    return Icon(iconData, size: 40, color: Colors.black.withValues(alpha: 0.7));
   }
 }
