@@ -17,7 +17,7 @@ class P2pService {
 
   Registration? _registration;
   Discovery? _discovery;
-  io.Socket? _socket;
+  Socket? _socket;
 
   Future<void> init(String deviceName) async {
     // 0. Load Cache for seamless feel
@@ -46,7 +46,7 @@ class P2pService {
     final ws = await WebSocket.connect(wsUrl);
     
     // Send mirroring offer
-    ws.add(JSON.encode({
+    ws.add(json.encode({
       'type': 'command',
       'category': 'mirror',
       'action': 'start',
@@ -87,7 +87,7 @@ class P2pService {
       final dir = await getApplicationDocumentsDirectory();
       final file = File('${dir.path}/peers_cache.json');
       final data = peers.map((p) => {
-        'id': p.id, 'name': p.name, 'ip': p.ip, 'type': p.type
+        'id': p.id, 'name': p.name, 'ip': p.ip, 'type': p.type, 'port': p.port
       }).toList();
       await file.writeAsString(json.encode(data));
     } catch (e) {
@@ -102,13 +102,18 @@ class P2pService {
       if (await file.exists()) {
         final data = json.decode(await file.readAsString()) as List;
         final peers = data.map((item) => Peer(
-          id: item['id'], name: item['name'], ip: item['ip'], type: item['type']
+          id: item['id'], name: item['name'], ip: item['ip'], 
+          type: item['type'], port: item['port'] ?? 8765
         )).toList();
-        _peersController.add(peers);
+        _peersController.add(peers.cast<Peer>());
       }
     } catch (e) {
       debugPrint('Cache load failed: $e');
     }
+  }
+
+  void dispose() {
+    _peersController.close();
   }
 }
 

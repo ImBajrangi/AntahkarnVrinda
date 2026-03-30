@@ -357,6 +357,19 @@ class DeviceAgentService : Service() {
 
     // ═══ LIFECYCLE ═══
 
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        // Redundant call to ensure Android 14+ satisfaction
+        createNotificationChannel()
+        val notification = android.app.Notification.Builder(this, "antahkarn_channel")
+            .setContentTitle("Antahkarn Agent Active")
+            .setContentText("Unified mesh synchronization active")
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .build()
+        startForeground(1, notification)
+        
+        return START_STICKY
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
