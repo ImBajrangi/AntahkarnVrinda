@@ -67,8 +67,9 @@ class AgentBridge {
       const cb = this.pendingCallbacks.get(msg.replyTo);
       if (cb) { cb(msg.payload); this.pendingCallbacks.delete(msg.replyTo); }
     }
-    if (msg.category === 'device' && msg.action === 'identify') {
-      // We were asked to identify
+    if (msg.type === 'command' && msg.category === 'mirror' && msg.action === 'frame') {
+      this._emit('frame', msg.payload);
+      this._emit('mirror', { type: 'frame', data: msg });
     }
   }
 
@@ -154,6 +155,76 @@ function DeviceIcon({ type, className = '' }) {
 }
 
 // ═══════════════════════════════════════════════════
+//  MIRROR VIEWER
+// ═══════════════════════════════════════════════════
+function MirrorViewer({ peerId, onClose }) {
+  const canvasRef = useRef(null);
+  const [fps, setFps] = useState(0);
+  const frameCount = useRef(0);
+
+  useEffect(() => {
+    let lastTime = Date.now();
+    const handleFrame = (frame) => {
+      if (!canvasRef.current || !frame.data) return;
+      
+      const ctx = canvasRef.current.getContext('2d');
+      const img = new Image();
+      img.onload = () => {
+        ctx.drawImage(img, 0, 0, canvasRef.current.width, canvasRef.current.height);
+        frameCount.current++;
+      };
+      // We assume Android sends JPEG or H.264-Base64
+      // For H.264, we would use a WASM decoder here. 
+      // Falling back to a clean data-URI for the 'perfectly working' initial bridge.
+      img.src = `data:image/jpeg;base64,${frame.data}`;
+    };
+
+    bridge.on('frame', handleFrame);
+    
+    const fpsInterval = setInterval(() => {
+      setFps(frameCount.current);
+      frameCount.current = 0;
+    }, 1000);
+
+    return () => {
+      bridge.sendCommand(peerId, 'mirror', 'stop', {});
+      clearInterval(fpsInterval);
+    };
+  }, [peerId]);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-10">
+      <div className="w-full max-w-sm flex flex-col gap-4">
+        <div className="flex items-center justify-between text-white">
+          <div className="flex items-center gap-2">
+            <span className="w-2 h-2 rounded-full bg-red-500 animate-pulse" />
+            <span className="mono text-xs font-bold uppercase tracking-widest">Live Mirror</span>
+            <span className="mono text-[10px] opacity-40">| {fps} FPS</span>
+          </div>
+          <button onClick={onClose} className="hover:opacity-60 transition-opacity">
+            <span className="material-symbols-outlined">close</span>
+          </button>
+        </div>
+        
+        <div className="aspect-[9/16] bg-black border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
+          <canvas ref={canvasRef} width={720} height={1280} className="w-full h-full object-contain" />
+          <div className="absolute inset-0 pointer-events-none border border-white/5 rounded-xl" />
+        </div>
+
+        <div className="flex justify-center gap-4 mt-4">
+           <button className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-full transition-colors">
+             <span className="material-symbols-outlined">home</span>
+           </button>
+           <button className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-full transition-colors">
+             <span className="material-symbols-outlined">arrow_back</span>
+           </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════
 //  MAIN APP
 // ═══════════════════════════════════════════════════
 function App() {
@@ -162,6 +233,7 @@ function App() {
   const [files, setFiles] = useState([]);
   const [activeTab, setActiveTab] = useState('radar');
   const [statusMsg, setStatusMsg] = useState('');
+  const [mirrorPeerId, setMirrorPeerId] = useState(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
@@ -264,7 +336,10 @@ function App() {
                             className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors">
                             TAP
                           </button>
-                          <button onClick={() => bridge.sendCommand(peer.id, 'mirror', 'start', { quality: 'high' })}
+                          <button onClick={() => {
+                            setMirrorPeerId(peer.id);
+                            bridge.sendCommand(peer.id, 'mirror', 'start', { quality: 'high' });
+                          }}
                             className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors">
                             MIRROR
                           </button>
@@ -447,6 +522,8 @@ function App() {
           </button>
         ))}
       </nav>
+
+      {mirrorPeerId && <MirrorViewer peerId={mirrorPeerId} onClose={() => setMirrorPeerId(null)} />}
 
       <input type="file" multiple className="hidden" ref={fileInputRef} />
     </div>

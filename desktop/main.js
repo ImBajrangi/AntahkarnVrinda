@@ -7,6 +7,7 @@
 
 const { app, BrowserWindow, ipcMain, clipboard } = require('electron');
 const path = require('path');
+const { execSync } = require('child_process');
 const { DeviceAgent } = require('./agent');
 
 let mainWindow;
@@ -25,6 +26,11 @@ function createWindow() {
         show: false,
         backgroundColor: '#F7F7F5'
     });
+
+    // Kill any existing agent on port 8765 to avoid EADDRINUSE crashes
+    if (process.platform !== 'win32') {
+        try { execSync('lsof -i :8765 -t | xargs kill -9 2>/dev/null'); } catch(e) {}
+    }
 
     // Start the Device Agent
     const uploadsDir = path.join(app.getPath('downloads'), 'AntahkarnVrinda');

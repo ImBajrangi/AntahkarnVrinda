@@ -28,6 +28,7 @@ class DeviceAgentService : Service() {
     }
 
     private var wsServer: AgentWebSocketServer? = null
+    private var screenCaptureHandler: ScreenCaptureHandler? = null
     private val commandRouter = CommandRouter()
     private val connectedPeers = mutableMapOf<String, WebSocket>()
 
@@ -46,6 +47,8 @@ class DeviceAgentService : Service() {
         commandRouter.register("file", "list") { msg -> handleFileList(msg) }
         commandRouter.register("mirror", "start") { msg -> handleMirrorStart(msg) }
         commandRouter.register("mirror", "stop") { _ -> handleMirrorStop() }
+        
+        screenCaptureHandler = ScreenCaptureHandler(this, this)
         commandRouter.register("clipboard", "get") { _ -> JSONObject().put("text", "") }
         commandRouter.register("clipboard", "set") { msg -> JSONObject().put("success", true) }
 
@@ -131,13 +134,19 @@ class DeviceAgentService : Service() {
     }
 
     private fun handleMirrorStart(msg: JSONObject): JSONObject {
-        // Trigger screen capture via MediaProjection (requires user permission)
-        Log.i(TAG, "Mirror start requested")
+        // Launch the activity to get permission
+        val intent = Intent(this, CapturePermissionActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        startActivity(intent)
         return JSONObject().put("accepted", true).put("status", "awaiting_permission")
     }
 
+    fun handleCapturePermissionGranted(resultCode: Int, data: Intent) {
+        screenCaptureHandler?.start(resultCode, data)
+    }
+
     private fun handleMirrorStop(): JSONObject {
-        Log.i(TAG, "Mirror stop requested")
+        screenCaptureHandler?.stop()
         return JSONObject().put("stopped", true)
     }
 

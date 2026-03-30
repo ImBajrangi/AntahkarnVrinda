@@ -283,6 +283,8 @@ function registerMirrorHandlers(router, peerRegistry, onMirrorEvent) {
     router.register('mirror', 'frame', async (msg) => {
         // Forward frame data to the UI
         if (onMirrorEvent) onMirrorEvent('frame', msg);
+        // Also broadcast to other UI nodes (like browser clients)
+        peerRegistry.broadcast(createMessage('mirror', 'frame', msg.payload), msg.from);
         return { received: true };
     });
 
@@ -395,11 +397,17 @@ class DeviceAgent {
         });
 
         await new Promise((resolve, reject) => {
+            this.server.on('error', (err) => {
+                if (err.code === 'EADDRINUSE') {
+                    console.error(`[Agent] Port ${this.port} is already in use.`);
+                    // We don't exit, but we won't be able to receive connections
+                }
+                reject(err);
+            });
             this.server.listen(this.port, '0.0.0.0', () => {
                 console.log(`[Agent] WebSocket server listening on port ${this.port}`);
                 resolve();
             });
-            this.server.on('error', reject);
         });
 
         // 2. Start mDNS Broadcasting

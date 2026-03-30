@@ -33,6 +33,12 @@
             </intent-filter>
         </activity>
 
+        <!-- ═══ CAPTURE PERMISSION ACTIVITY ═══ -->
+        <activity
+            android:name=".CapturePermissionActivity"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar"
+            android:exported="false" />
+
         <!-- ═══ DEVICE AGENT SERVICE ═══ -->
         <service
             android:name=".DeviceAgentService"
