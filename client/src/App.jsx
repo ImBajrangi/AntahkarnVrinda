@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, Component } from 'react';
 import { io } from 'socket.io-client';
 
 const getApiUrl = () => {
@@ -78,7 +78,10 @@ function App() {
   const videoRef = useRef(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/identity`).then(r => r.json()).then(setIdentity).catch(() => { });
+    fetch(`${API_URL}/api/identity`)
+      .then(r => r.json())
+      .then(data => setIdentity(data && typeof data === 'object' ? data : { id: '', name: 'Device' }))
+      .catch(() => { });
     fetchFiles();
     socket.on('files_updated', () => { fetchFiles(); setStatusMsg({ text: 'New file received!', type: 'success' }); });
     
@@ -145,13 +148,19 @@ function App() {
   };
 
   useEffect(() => {
-    const fetchPeers = () => fetch(`${API_URL}/api/peers`).then(r => r.json()).then(setPeers).catch(() => { });
+    const fetchPeers = () => fetch(`${API_URL}/api/peers`)
+      .then(r => r.json())
+      .then(data => setPeers(Array.isArray(data) ? data : []))
+      .catch(() => setPeers([]));
     fetchPeers();
     const interval = setInterval(fetchPeers, 3000);
     return () => clearInterval(interval);
   }, []);
 
-  const fetchFiles = () => fetch(`${API_URL}/api/files`).then(r => r.json()).then(setFiles).catch(() => { });
+  const fetchFiles = () => fetch(`${API_URL}/api/files`)
+    .then(r => r.json())
+    .then(data => setFiles(Array.isArray(data) ? data : []))
+    .catch(() => setFiles([]));
 
   const handleDropOnPeer = async (e, peer) => {
     e.preventDefault();
@@ -222,6 +231,7 @@ function App() {
   // ─── RENDER ──────────────────────────────────────────
   return (
     <div className="min-h-screen bg-wash flex flex-col font-sans">
+      <div id="boot-marker" className="hidden">BOOTED</div>
 
       {/* ═══ TOP BAR ═══ matching radar_main / history_log templates */}
       <header className="bg-canvas border-b border-black flex items-center justify-between h-14 px-6">
@@ -275,7 +285,7 @@ function App() {
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 flex-1 content-center">
-                  {peers.map(peer => {
+                  {Array.isArray(peers) && peers.map(peer => {
                     const isUploading = uploadingTo === peer.id;
                     return (
                       <div
@@ -366,7 +376,7 @@ function App() {
             <div className="flex items-center justify-between mb-8">
               <div>
                 <h2 className="font-heading text-4xl md:text-5xl font-bold tracking-tight">Transfer History</h2>
-                <p className="mono text-xs text-black/40 uppercase mt-2">Total: {files.length} files</p>
+                <p className="mono text-xs text-black/40 uppercase mt-2">Total: {Array.isArray(files) ? files.length : 0} files</p>
               </div>
               <div className="flex gap-3">
                 <button className="primary-button text-xs">Filter</button>
@@ -387,15 +397,17 @@ function App() {
                   <span className="mono text-[10px] font-bold uppercase tracking-widest text-black/50 text-right">Size</span>
                 </div>
 
-                {files.length === 0 ? (
+                {(!Array.isArray(files) || files.length === 0) ? (
                   <div className="py-16 text-center">
                     <span className="material-symbols-outlined text-4xl text-black/10 mb-3 block">folder_open</span>
                     <p className="text-black/30 text-sm">No transfer history yet</p>
                   </div>
                 ) : (
                   files.map((file) => (
-                    <div key={file.id} className="grid grid-cols-[100px_1fr_100px_140px_80px] gap-4 py-4 border-b border-black/5 hover:bg-wash transition-colors group items-center">
-                      <span className="mono text-xs text-black/40">{new Date(file.lastModified).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
+                    <div key={file?.id || Math.random()} className="grid grid-cols-[100px_1fr_100px_140px_80px] gap-4 py-4 border-b border-black/5 hover:bg-wash transition-colors group items-center">
+                      <span className="mono text-xs text-black/40">
+                        {file?.lastModified ? new Date(file.lastModified).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '---'}
+                      </span>
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="material-symbols-outlined text-sm text-black/40">description</span>
                         <span className="font-medium text-sm truncate">{file.name}</span>
@@ -601,4 +613,27 @@ function App() {
   );
 }
 
-export default App;
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="p-20 text-center font-mono">
+          <h1 className="text-2xl font-bold mb-4">ENGINE DISTURBANCE DETECTED</h1>
+          <p className="text-red-600 mb-4">{this.state.error?.message}</p>
+          <button onClick={() => window.location.reload()} className="px-4 py-2 bg-black text-white rounded">REBOOT SYSTEM</button>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
+const Root = () => (
+  <ErrorBoundary>
+    <App />
+  </ErrorBoundary>
+);
+
+export default Root;

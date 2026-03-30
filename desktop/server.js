@@ -184,7 +184,7 @@ function startServer(uploadsDir, staticDistDir, port = 3000) {
             // === 3. DISCOVERY via mDNS ===
             console.log(`[mDNS] Broadcasting service _localshare._tcp on port ${port}`);
             bonjour.publish({
-                name: `LocalShare Network - ${DEVICE_NAME}-${MACHINE_ID.substring(0, 4)}`,
+                name: `AntahkarnVrinda-${DEVICE_NAME}-${crypto.randomBytes(2).toString('hex')}`,
                 type: 'localshare',
                 port: port,
                 txt: { id: MACHINE_ID, type: 'desktop', deviceName: DEVICE_NAME }
