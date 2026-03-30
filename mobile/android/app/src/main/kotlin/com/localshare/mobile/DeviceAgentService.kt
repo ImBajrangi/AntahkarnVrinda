@@ -1,4 +1,4 @@
-package com.localshare.mobile
+package com.antahkarn.vrinda
 
 import android.app.Service
 import android.content.Intent

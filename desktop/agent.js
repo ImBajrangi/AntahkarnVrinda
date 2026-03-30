@@ -408,7 +408,7 @@ class DeviceAgent {
 
         this.wss.on('connection', (ws, req) => {
             const remoteIp = req.socket.remoteAddress;
-            console.log(`[Agent] Incoming connection from ${remoteIp}`);
+            console.log(`[Vrinda] Incoming connection from ${remoteIp}`);
 
             let pendingFile = null;
 
@@ -420,7 +420,7 @@ class DeviceAgent {
                             const msg = JSON.parse(str);
                             if (msg.action === 'transfer') {
                                 pendingFile = msg.payload;
-                                console.log(`[Agent] Receiving real file: ${pendingFile.name}...`);
+                                console.log(`[Vrinda] Receiving real file: ${pendingFile.name}...`);
                                 return;
                             }
                             await this._handleMessage(msg, ws);
@@ -428,11 +428,11 @@ class DeviceAgent {
                             // Binary chunk for the pending file
                             const filePath = path.join(this.uploadsDir, pendingFile.name);
                             fs.writeFileSync(filePath, raw);
-                            console.log(`[Agent] Saved real file: ${pendingFile.name} to disk.`);
+                            console.log(`[Vrinda] Saved real file: ${pendingFile.name} to disk.`);
                             pendingFile = null;
                         }
                     } catch (err) {
-                        console.error('[Agent] Real-world data error:', err.message);
+                        console.error('[Vrinda] Real-world data error:', err.message);
                     }
                 }
             });
@@ -442,7 +442,7 @@ class DeviceAgent {
                 for (const [id, peer] of this.peerRegistry.peers) {
                     if (peer.ws === ws) {
                         this.peerRegistry.remove(id);
-                        console.log(`[Agent] Peer disconnected: ${id}`);
+                        console.log(`[Vrinda] Peer disconnected: ${id}`);
                         if (this.onPeersChanged) this.onPeersChanged(this.peerRegistry.getAll());
                         break;
                     }
@@ -456,13 +456,13 @@ class DeviceAgent {
         await new Promise((resolve, reject) => {
             this.server.on('error', (err) => {
                 if (err.code === 'EADDRINUSE') {
-                    console.error(`[Agent] Port ${this.port} is already in use.`);
+                    console.error(`[Vrinda] Port ${this.port} is already in use.`);
                     // We don't exit, but we won't be able to receive connections
                 }
                 reject(err);
             });
             this.server.listen(this.port, '0.0.0.0', () => {
-                console.log(`[Agent] WebSocket server listening on port ${this.port}`);
+                console.log(`[Vrinda] WebSocket server listening on port ${this.port}`);
                 resolve();
             });
         });
@@ -481,16 +481,16 @@ class DeviceAgent {
                     version: '2.0'
                 }
             });
-            console.log(`[Agent] mDNS broadcasting: ${serviceName}`);
+            console.log(`[Vrinda] mDNS broadcasting: ${serviceName}`);
         } catch (err) {
-            console.warn(`[Agent] mDNS broadcast failed (non-fatal): ${err.message}`);
+            console.warn(`[Vrinda] mDNS broadcast failed (non-fatal): ${err.message}`);
         }
 
         // 3. Start mDNS Discovery
         this.browser = this.bonjour.find({ type: 'antahkarn' }, (service) => {
             const peerId = service.txt?.id;
             if (peerId && peerId !== DEVICE_ID) {
-                console.log(`[Agent] Discovered peer: ${service.txt.name} (${peerId})`);
+                console.log(`[Vrinda] Discovered peer: ${service.txt.name} (${peerId})`);
                 this._connectToPeer(service);
             }
         });
@@ -500,7 +500,7 @@ class DeviceAgent {
             this.peerRegistry.broadcast(createMessage('device', 'heartbeat'));
         }, 5000);
 
-        console.log(`[Agent] Device Agent started. ID: ${DEVICE_ID}`);
+        console.log(`[Vrinda] Device Agent started. ID: ${DEVICE_ID}`);
         return { port: this.port, deviceId: DEVICE_ID };
     }
 
@@ -516,7 +516,7 @@ class DeviceAgent {
             const ws = new WebSocket(`ws://${ip}:${port}`);
             
             ws.on('open', () => {
-                console.log(`[Agent] Connected to peer: ${service.txt.name}`);
+                console.log(`[Vrinda] Connected to peer: ${service.txt.name}`);
                 // Send our identity
                 ws.send(createMessage('device', 'identify', {
                     deviceId: DEVICE_ID,
@@ -537,22 +537,22 @@ class DeviceAgent {
                     const msg = JSON.parse(raw.toString());
                     await this._handleMessage(msg, ws);
                 } catch (err) {
-                    console.error('[Agent] Bad message from peer:', err.message);
+                    console.error('[Vrinda] Bad message from peer:', err.message);
                 }
             });
 
             ws.on('close', () => {
                 this.peerRegistry.remove(peerId);
-                console.log(`[Agent] Peer disconnected: ${peerId}`);
+                console.log(`[Vrinda] Peer disconnected: ${peerId}`);
                 if (this.onPeersChanged) this.onPeersChanged(this.peerRegistry.getAll());
             });
 
             ws.on('error', (err) => {
-                console.warn(`[Agent] Peer connection error: ${err.message}`);
+                console.warn(`[Vrinda] Peer connection error: ${err.message}`);
             });
 
         } catch (err) {
-            console.warn(`[Agent] Failed to connect to ${ip}:${port}: ${err.message}`);
+            console.warn(`[Vrinda] Failed to connect to ${ip}:${port}: ${err.message}`);
         }
     }
 
@@ -561,7 +561,7 @@ class DeviceAgent {
         // Special: identity response — register the peer
         if (msg.category === 'device' && msg.action === 'identify' && msg.payload?.deviceId) {
             this.peerRegistry.add(msg.payload.deviceId, ws, msg.payload);
-            console.log(`[Agent] Peer identified: ${msg.payload.deviceName} (${msg.payload.deviceType})`);
+            console.log(`[Vrinda] Peer identified: ${msg.payload.deviceName} (${msg.payload.deviceType})`);
             if (this.onPeersChanged) this.onPeersChanged(this.peerRegistry.getAll());
             return;
         }
@@ -601,7 +601,7 @@ class DeviceAgent {
         if (this.wss) this.wss.close();
         if (this.server) this.server.close();
         this.bonjour.destroy();
-        console.log('[Agent] Stopped.');
+        console.log('[Vrinda] Stopped.');
     }
 }
 

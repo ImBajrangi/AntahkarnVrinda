@@ -6,7 +6,7 @@ plugins {
 }
 
 android {
-    namespace = "com.localshare.mobile"
+    namespace = "com.antahkarn.vrinda"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -20,7 +20,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.localshare.mobile"
+        applicationId = "com.antahkarn.vrinda"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

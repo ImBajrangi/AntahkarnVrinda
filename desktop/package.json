@@ -1,8 +1,8 @@
 {
-    "name": "local-share",
-    "productName": "Local Share",
+    "name": "antahkarn-vrinda-agent",
+    "productName": "AntahkarnVrinda",
     "version": "1.0.0",
-    "description": "Local File Sharing Desktop App",
+    "description": "Unified Mesh Agent for AntahkarnVrinda",
     "main": "main.js",
     "scripts": {
         "start": "electron .",

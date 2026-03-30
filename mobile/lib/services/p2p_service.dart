@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:nsd/nsd.dart';
 import 'package:flutter/foundation.dart' as foundation;
 import 'dart:convert';
+import 'package:path_provider/path_provider.dart';
 import 'mirror_service.dart';
 import '../models/peer.dart';
 
@@ -19,15 +20,16 @@ class P2pService {
   io.Socket? _socket;
 
   Future<void> init(String deviceName) async {
+    // 0. Load Cache for seamless feel
+    _loadCache();
+
     // 1. Start mDNS Discovery
     _discovery = await startDiscovery('_antahkarn._tcp');
     _discovery!.addListener(() {
       final services = _discovery!.services;
-      debugPrint('Discovered services: ${services.length}');
-
-      // Update peers list
       final currentPeers = services.map((s) => Peer.fromMdns(s)).toList();
       _peersController.add(currentPeers);
+      _saveCache(currentPeers); // Persist
     });
 
     // 2. Register this device on mDNS (handled by Kotlin service too, but for parity)
@@ -80,15 +82,33 @@ class P2pService {
     }
   }
 
-  Future<void> dispose() async {
-    if (_registration != null) {
-      await unregister(_registration!);
+  Future<void> _saveCache(List<Peer> peers) async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/peers_cache.json');
+      final data = peers.map((p) => {
+        'id': p.id, 'name': p.name, 'ip': p.ip, 'type': p.type
+      }).toList();
+      await file.writeAsString(json.encode(data));
+    } catch (e) {
+      debugPrint('Cache save failed: $e');
     }
-    if (_discovery != null) {
-      await stopDiscovery(_discovery!);
+  }
+
+  Future<void> _loadCache() async {
+    try {
+      final dir = await getApplicationDocumentsDirectory();
+      final file = File('${dir.path}/peers_cache.json');
+      if (await file.exists()) {
+        final data = json.decode(await file.readAsString()) as List;
+        final peers = data.map((item) => Peer(
+          id: item['id'], name: item['name'], ip: item['ip'], type: item['type']
+        )).toList();
+        _peersController.add(peers);
+      }
+    } catch (e) {
+      debugPrint('Cache load failed: $e');
     }
-    _socket?.dispose();
-    _peersController.close();
   }
 }
 

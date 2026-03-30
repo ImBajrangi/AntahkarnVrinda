@@ -187,7 +187,7 @@ if (fs.existsSync(CLIENT_BUILD_PATH)) {
 }
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`\n🚀 Local Share Server is running!`);
+    console.log(`\n🚀 AntahkarnVrinda Server is running!`);
     console.log(`\n📁 Files are saved to: ${UPLOADS_DIR}`);
     console.log(`\n🌐 Access the app on other devices using these URLs:`);
 
