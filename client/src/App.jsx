@@ -41,7 +41,7 @@ class AgentBridge {
         try {
           const msg = JSON.parse(e.data);
           this._handleMessage(msg);
-        } catch {}
+        } catch { }
       };
       this.ws.onerror = () => console.warn('[Bridge] WebSocket error');
       this.ws.onclose = () => {
@@ -166,7 +166,7 @@ function MirrorViewer({ peerId, onClose }) {
     let lastTime = Date.now();
     const handleFrame = (frame) => {
       if (!canvasRef.current || !frame.data) return;
-      
+
       const ctx = canvasRef.current.getContext('2d');
       const img = new Image();
       img.onload = () => {
@@ -180,7 +180,7 @@ function MirrorViewer({ peerId, onClose }) {
     };
 
     bridge.on('frame', handleFrame);
-    
+
     const fpsInterval = setInterval(() => {
       setFps(frameCount.current);
       frameCount.current = 0;
@@ -205,19 +205,19 @@ function MirrorViewer({ peerId, onClose }) {
             <span className="material-symbols-outlined">close</span>
           </button>
         </div>
-        
+
         <div className="aspect-[9/16] bg-black border border-white/10 rounded-xl overflow-hidden shadow-2xl relative">
           <canvas ref={canvasRef} width={720} height={1280} className="w-full h-full object-contain" />
           <div className="absolute inset-0 pointer-events-none border border-white/5 rounded-xl" />
         </div>
 
         <div className="flex justify-center gap-4 mt-4">
-           <button className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-full transition-colors">
-             <span className="material-symbols-outlined">home</span>
-           </button>
-           <button className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-full transition-colors">
-             <span className="material-symbols-outlined">arrow_back</span>
-           </button>
+          <button className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-full transition-colors">
+            <span className="material-symbols-outlined">home</span>
+          </button>
+          <button className="bg-white/10 hover:bg-white/20 text-white p-3 rounded-full transition-colors">
+            <span className="material-symbols-outlined">arrow_back</span>
+          </button>
         </div>
       </div>
     </div>
@@ -251,11 +251,11 @@ function App() {
       try {
         const p = await bridge.getPeers();
         if (Array.isArray(p)) setPeers(p);
-      } catch {}
+      } catch { }
       try {
         const f = await bridge.listFiles();
         if (Array.isArray(f)) setFiles(f);
-      } catch {}
+      } catch { }
     };
     fetchData();
     const interval = setInterval(fetchData, 3000);
