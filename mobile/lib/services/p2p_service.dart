@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 import 'package:nsd/nsd.dart';
-import 'package:socket_io_client/socket_io_client.dart' as io;
-import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' as foundation;
+import 'dart:convert';
 import 'mirror_service.dart';
 import '../models/peer.dart';
 
@@ -21,8 +20,7 @@ class P2pService {
 
   Future<void> init(String deviceName) async {
     // 1. Start mDNS Discovery
-    _discovery = await startDiscovery('_localshare._tcp');
-    // _discovery = await startDiscovery('_localshare._tcp');
+    _discovery = await startDiscovery('_antahkarn._tcp');
     _discovery!.addListener(() {
       final services = _discovery!.services;
       debugPrint('Discovered services: ${services.length}');
@@ -32,85 +30,53 @@ class P2pService {
       _peersController.add(currentPeers);
     });
 
-    // 2. Register this device on mDNS
+    // 2. Register this device on mDNS (handled by Kotlin service too, but for parity)
     _registration = await register(
-      Service(name: deviceName, type: '_localshare._tcp', port: 3000),
+      Service(name: deviceName, type: '_antahkarn._tcp', port: 8765),
     );
 
     debugPrint('Registered as $deviceName on mDNS');
   }
 
   Future<void> startMirroring(Peer target) async {
-    final peerUrl = 'http://${target.ip}:${target.port}';
-    final socket = io.io(peerUrl, <String, dynamic>{
-      'transports': ['websocket'],
-      'autoConnect': false,
-    });
+    // Direct WebSocket connection for mirroring signaling
+    final wsUrl = 'ws://${target.ip}:8765';
+    final ws = await WebSocket.connect(wsUrl);
     
-    socket.connect();
-    socket.onConnect((_) {
-      MirrorService().startMirroring(socket, 'desktop');
-    });
+    // Send mirroring offer
+    ws.add(JSON.encode({
+      'type': 'command',
+      'category': 'mirror',
+      'action': 'start',
+      'payload': { 'quality': 'high' }
+    }));
   }
 
   Future<void> sendFiles(List<File> files, Peer target) async {
-    // 1. Connect to peer's socket for signaling
-    final peerUrl = 'http://${target.ip}:${target.port}';
-    final socket = io.io(peerUrl, <String, dynamic>{
-      'transports': ['websocket'],
-      'autoConnect': false,
-    });
-
-    socket.connect();
-
-    socket.onConnect((_) {
-      debugPrint('Connected to peer socket');
-
-      // 2. Request transfer
-      socket.emit('transfer_request', {
-        'fromId': 'mobile-node',
-        'fromName': 'My Phone',
-        'filesCount': files.length,
-        'totalSize': files.fold(0, (sum, f) => sum + f.lengthSync()),
-      });
-    });
-
-    socket.on('transfer_response', (data) async {
-      if (data['status'] == 'accepted') {
-        final transferId = data['transferId'];
-        // 3. Upload files via HTTP
-        await _uploadFiles(files, target, transferId);
-      }
-    });
-  }
-
-  Future<void> _uploadFiles(
-      List<File> files, Peer target, String transferId) async {
-    final dio = Dio();
-    final formData = FormData();
-
+    debugPrint('Real-world file transfer initiated to ${target.name}');
+    
+    final wsUrl = 'ws://${target.ip}:8765';
+    final ws = await WebSocket.connect(wsUrl);
+    
     for (var file in files) {
-      formData.files.add(MapEntry(
-        'files',
-        await MultipartFile.fromFile(file.path,
-            filename: file.path.split('/').last),
-      ));
-    }
-
-    try {
-      await dio.post(
-        'http://${target.ip}:${target.port}/api/p2p/upload',
-        data: formData,
-        options: Options(
-          headers: {'x-transfer-id': transferId},
-        ),
-        onSendProgress: (sent, total) {
-          debugPrint(
-              'Upload progress: ${(sent / total * 100).toStringAsFixed(0)}%');
-        },
-      );
-    } catch (e) {
-      debugPrint('Upload failed: $e');
+      final fileName = file.path.split('/').last;
+      final bytes = await file.readAsBytes();
+      
+      // Send file metadata command
+      ws.add(json.encode({
+        'type': 'command',
+        'category': 'file',
+        'action': 'transfer',
+        'payload': {
+          'name': fileName,
+          'size': bytes.length,
+          'id': DateTime.now().millisecondsSinceEpoch.toString()
+        }
+      }));
+      
+      // Send binary data (chunking logic or direct send)
+      ws.add(bytes);
+      debugPrint('Sent $fileName (${bytes.length} bytes)');
     }
   }
 

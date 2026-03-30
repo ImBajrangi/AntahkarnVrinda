@@ -36,25 +36,78 @@ class DeviceAgentService : Service() {
         super.onCreate()
         instance = this
         
-        // Register command handlers
-        commandRouter.register("device", "info") { msg -> handleDeviceInfo() }
+        // 1. Setup Foreground Notification (Required for Android 8+)
+        createNotificationChannel()
+        val notification = android.app.Notification.Builder(this, "antahkarn_channel")
+            .setContentTitle("Antahkarn Agent Active")
+            .setContentText("Unified mesh synchronization active")
+            .setSmallIcon(android.R.drawable.stat_notify_sync)
+            .build()
+        startForeground(1, notification)
+        
+        // 2. Register command handlers
+        commandRouter.register("device", "info") { _ -> handleDeviceInfo() }
         commandRouter.register("device", "heartbeat") { _ -> JSONObject().put("alive", true).put("timestamp", System.currentTimeMillis()) }
-        commandRouter.register("device", "identify") { _ -> JSONObject() } // no-op, we send our identity on connect
+        commandRouter.register("device", "identify") { _ -> JSONObject() } 
         commandRouter.register("device", "battery") { _ -> handleBattery() }
         commandRouter.register("device", "storage") { _ -> handleStorage() }
+        commandRouter.register("device", "status") { _ -> handleStatus() }
+        commandRouter.register("shell", "run") { msg -> handleShellRun(msg) }
         commandRouter.register("control", "tap") { msg -> handleTap(msg) }
         commandRouter.register("control", "swipe") { msg -> handleSwipe(msg) }
         commandRouter.register("file", "list") { msg -> handleFileList(msg) }
         commandRouter.register("mirror", "start") { msg -> handleMirrorStart(msg) }
         commandRouter.register("mirror", "stop") { _ -> handleMirrorStop() }
+        commandRouter.register("clipboard", "get") { _ -> handleClipboardGet() }
+        commandRouter.register("clipboard", "set") { msg -> handleClipboardSet(msg) }
         
         screenCaptureHandler = ScreenCaptureHandler(this, this)
-        commandRouter.register("clipboard", "get") { _ -> JSONObject().put("text", "") }
-        commandRouter.register("clipboard", "set") { msg -> JSONObject().put("success", true) }
 
-        // Start WebSocket server
+        // 3. Start WebSocket server
         startAgentServer()
+        
+        // 4. Register on mDNS (NSD) for the antahkarn mesh
+        registerServiceNsd()
+        
         Log.i(TAG, "Device Agent started. ID: $DEVICE_ID")
+    }
+
+    private fun createNotificationChannel() {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            val serviceChannel = android.app.NotificationChannel(
+                "antahkarn_channel", "Antahkarn Agent Channel",
+                android.app.NotificationManager.IMPORTANCE_DEFAULT
+            )
+            val manager = getSystemService(android.app.NotificationManager::class.java)
+            manager.createNotificationChannel(serviceChannel)
+        }
+    }
+
+    private fun registerServiceNsd() {
+        val nsdManager = getSystemService(android.content.Context.NSD_SERVICE) as android.net.nsd.NsdManager
+        val serviceInfo = android.net.nsd.NsdServiceInfo().apply {
+            serviceName = "Vrinda-${android.os.Build.MODEL}-${DEVICE_ID.take(4)}"
+            serviceType = "_antahkarn._tcp"
+            port = AGENT_PORT
+            setAttribute("id", DEVICE_ID)
+            setAttribute("name", android.os.Build.MODEL)
+            setAttribute("type", "android")
+        }
+        
+        try {
+            nsdManager.registerService(serviceInfo, android.net.nsd.NsdManager.PROTOCOL_DNS_SD, object : android.net.nsd.NsdManager.RegistrationListener {
+                override fun onServiceRegistered(NsdServiceInfo: android.net.nsd.NsdServiceInfo) {
+                    Log.i(TAG, "Registered as ${NsdServiceInfo.serviceName} on mDNS")
+                }
+                override fun onRegistrationFailed(serviceInfo: android.net.nsd.NsdServiceInfo, errorCode: Int) {
+                    Log.e(TAG, "mDNS Registration failed: $errorCode")
+                }
+                override fun onServiceUnregistered(arg0: android.net.nsd.NsdServiceInfo) {}
+                override fun onUnregistrationFailed(serviceInfo: android.net.nsd.NsdServiceInfo, errorCode: Int) {}
+            })
+        } catch (e: Exception) {
+            Log.e(TAG, "NSD initialization error: ${e.message}")
+        }
     }
 
     private fun startAgentServer() {
@@ -92,6 +145,24 @@ class DeviceAgentService : Service() {
             put("totalBytes", stat.totalBytes)
             put("freeBytes", stat.freeBytes)
             put("usedBytes", stat.totalBytes - stat.freeBytes)
+        }
+    }
+
+    private fun handleStatus(): JSONObject {
+        val activityManager = getSystemService(android.content.Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+        val memoryInfo = android.app.ActivityManager.MemoryInfo()
+        activityManager.getMemoryInfo(memoryInfo)
+        
+        return JSONObject().apply {
+            put("battery", handleBattery())
+            put("storage", handleStorage())
+            put("ram", JSONObject().apply {
+                put("total", memoryInfo.totalMem)
+                put("available", memoryInfo.availMem)
+                put("used", memoryInfo.totalMem - memoryInfo.availMem)
+                put("lowMemory", memoryInfo.lowMemory)
+            })
+            put("timestamp", System.currentTimeMillis())
         }
     }
 
@@ -143,6 +214,42 @@ class DeviceAgentService : Service() {
 
     fun handleCapturePermissionGranted(resultCode: Int, data: Intent) {
         screenCaptureHandler?.start(resultCode, data)
+    }
+
+    private fun handleClipboardGet(): JSONObject {
+        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = clipboard.primaryClip
+        val text = if (clip != null && clip.itemCount > 0) clip.getItemAt(0).text.toString() else ""
+        return JSONObject().put("text", text)
+    }
+
+    private fun handleClipboardSet(msg: JSONObject): JSONObject {
+        val payload = msg.optJSONObject("payload") ?: JSONObject()
+        val text = payload.optString("text", "")
+        val clipboard = getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = android.content.ClipData.newPlainText("Antahkarn", text)
+        clipboard.setPrimaryClip(clip)
+        return JSONObject().put("success", true)
+    }
+
+    private fun handleShellRun(msg: JSONObject): JSONObject {
+        val command = msg.optJSONObject("payload")?.optString("command", "") ?: ""
+        return try {
+            val process = Runtime.getRuntime().exec(command)
+            val output = process.inputStream.bufferedReader().readText()
+            val error = process.errorStream.bufferedReader().readText()
+            JSONObject().apply {
+                put("stdout", output)
+                put("stderr", error)
+                put("code", process.waitFor())
+            }
+        } catch (e: Exception) {
+            JSONObject().apply {
+                put("stdout", "")
+                put("stderr", e.message)
+                put("code", 1)
+            }
+        }
     }
 
     private fun handleMirrorStop(): JSONObject {

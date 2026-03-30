@@ -19,25 +19,27 @@ class LocalShareApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Local Share',
+      title: 'AntahkarnVrinda',
       debugShowCheckedModeBanner: false,
       theme: ThemeData(
         useMaterial3: true,
         scaffoldBackgroundColor: const Color(0xFFF7F7F5), // Wash
         colorScheme: ColorScheme.fromSeed(
-          seedColor: const Color(0xFFE04F38), // Accent
+          seedColor: Colors.black,
           primary: Colors.black, // Ink
-          secondary: const Color(0xFFE04F38),
+          secondary: Colors.black,
           surface: Colors.white, // Canvas
         ),
         textTheme: GoogleFonts.interTextTheme().copyWith(
           displayLarge: GoogleFonts.spaceGrotesk(
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w900,
             color: Colors.black,
+            letterSpacing: -2,
           ),
           titleLarge: GoogleFonts.spaceGrotesk(
-            fontWeight: FontWeight.bold,
+            fontWeight: FontWeight.w800,
             color: Colors.black,
+            letterSpacing: -1,
           ),
         ),
       ),
@@ -115,21 +117,20 @@ class _MainLayoutState extends State<MainLayout> {
           Container(
             height: 32,
             margin: const EdgeInsets.only(right: 12),
-            child: ElevatedButton(
+            child: TextButton(
               onPressed: () {},
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2B5CE7), // Template blue
+              style: TextButton.styleFrom(
+                backgroundColor: Colors.black,
                 foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(2)),
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                elevation: 0,
+                shape: const RoundedRectangleBorder(), // Neo-brutalist flat
+                padding: const EdgeInsets.symmetric(horizontal: 16),
               ),
               child: Text(
                 'SCAN',
                 style: GoogleFonts.spaceGrotesk(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 11,
+                  letterSpacing: 1,
                 ),
               ),
             ),

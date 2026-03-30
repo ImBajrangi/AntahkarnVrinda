@@ -20,6 +20,15 @@ class MainActivity : FlutterActivity() {
         } else {
             startService(agentIntent)
         }
+
+        // Request POST_NOTIFICATIONS for Android 13+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            val permission = "android.permission.POST_NOTIFICATIONS"
+            if (checkSelfPermission(permission) != android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                requestPermissions(arrayOf(permission), 101)
+            }
+        }
+        
         Log.i("MainActivity", "Device Agent service started")
 
         // Flutter ↔ Kotlin bridge

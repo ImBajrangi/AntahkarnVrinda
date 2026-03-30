@@ -231,34 +231,60 @@ function App() {
   const [identity, setIdentity] = useState({ id: '', name: 'Starting...', type: 'desktop' });
   const [peers, setPeers] = useState([]);
   const [files, setFiles] = useState([]);
+  const [transfers, setTransfers] = useState([]); // Real transfer tracking
   const [activeTab, setActiveTab] = useState('radar');
   const [statusMsg, setStatusMsg] = useState('');
   const [mirrorPeerId, setMirrorPeerId] = useState(null);
+  const [browsingPeerId, setBrowsingPeerId] = useState(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
+    // 1. Initial Load from Cache (Seamless feel)
+    const cachedPeers = localStorage.getItem('antahkarn_peers');
+    if (cachedPeers) setPeers(JSON.parse(cachedPeers));
+
+    // Universal response handler
+    bridge.on('response', (resp) => {
+      if (resp.category === 'file' && resp.action === 'list') {
+        const payload = resp.payload || {};
+        if (Array.isArray(payload.files)) setFiles(payload.files);
+      }
+    });
+
+    // Real-time peer status updates (hardware sync)
+    bridge.on('status', (data) => {
+      setPeers(prev => {
+        const next = prev.map(p => p.id === data.peerId ? { ...p, status: data.status } : p);
+        localStorage.setItem('antahkarn_peers', JSON.stringify(next));
+        return next;
+      });
+    });
+
+    // Identity and Peer discovery
     bridge.connect().then(async () => {
       const id = await bridge.getIdentity();
       if (id) setIdentity(id);
     });
 
     bridge.on('peers', (newPeers) => {
-      setPeers(Array.isArray(newPeers) ? newPeers : []);
+      const list = Array.isArray(newPeers) ? newPeers : [];
+      setPeers(list);
+      localStorage.setItem('antahkarn_peers', JSON.stringify(list));
     });
 
-    // Initial load + polling
+    // 2. Real-World Status Poller
     const fetchData = async () => {
       try {
         const p = await bridge.getPeers();
-        if (Array.isArray(p)) setPeers(p);
-      } catch { }
-      try {
-        const f = await bridge.listFiles();
-        if (Array.isArray(f)) setFiles(f);
+        if (Array.isArray(p)) {
+          setPeers(p);
+          p.forEach(peer => bridge.sendCommand(peer.id, 'device', 'status', {}));
+        }
       } catch { }
     };
+    
     fetchData();
-    const interval = setInterval(fetchData, 3000);
+    const interval = setInterval(fetchData, 8000);
     return () => clearInterval(interval);
   }, []);
 
@@ -328,10 +354,17 @@ function App() {
                         <p className="mono text-[10px] text-black/50 uppercase tracking-wide">{peer.type || 'device'}</p>
                       </div>
                       <div className="flex flex-col items-center gap-2">
-                        <div className="status-badge text-green-600">
-                          <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> {peer.connected ? 'CONNECTED' : 'DISCOVERED'}
+                        <div className="status-badge text-green-600 flex items-center gap-1.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
+                          {peer.status?.ram ? `${peer.status.ram.percent || '??'}% RAM` : (peer.connected ? 'SYNCED' : 'DISCOVERED')}
                         </div>
-                        <div className="flex gap-2 mt-2">
+                        {peer.status?.battery && (
+                          <div className="mono text-[9px] font-bold text-black/40 flex items-center gap-1">
+                            <span className="material-symbols-outlined text-[10px]">{peer.status.battery.charging ? 'battery_charging_full' : 'battery_full'}</span>
+                            {peer.status.battery.level}%
+                          </div>
+                        )}
+                        <div className="flex gap-1.5 mt-2 flex-wrap justify-center">
                           <button onClick={() => sendControl(peer.id, 'tap', { x: 540, y: 960 })}
                             className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors">
                             TAP
@@ -343,9 +376,42 @@ function App() {
                             className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors">
                             MIRROR
                           </button>
-                          <button onClick={() => bridge.sendCommand(peer.id, 'file', 'list', {})}
-                            className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors">
+                          <button onClick={() => {
+                            setBrowsingPeerId(peer.id);
+                            setActiveTab('history');
+                            bridge.sendCommand(peer.id, 'file', 'list', {});
+                          }}
+                            className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors text-nowrap">
                             FILES
+                          </button>
+                          <button onClick={async () => {
+                            try {
+                              const res = await bridge.sendCommand(peer.id, 'clipboard', 'get', {});
+                              if (res && res.payload) {
+                                setStatusMsg(`CLIPBOARD [${peer.name}]: ${res.payload.text || 'Empty'}`);
+                              }
+                            } catch (e) {
+                              setStatusMsg("Clipboard fetch failed.");
+                            }
+                          }}
+                            className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors text-nowrap">
+                            CLIPBOARD
+                          </button>
+                          <button onClick={async () => {
+                            const cmd = prompt("Enter shell command for " + peer.name);
+                            if (cmd) {
+                              try {
+                                const res = await bridge.sendCommand(peer.id, 'shell', 'run', { command: cmd });
+                                if (res && res.payload) {
+                                  alert(`STDOUT:\n${res.payload.stdout}\n\nSTDERR:\n${res.payload.stderr}`);
+                                }
+                              } catch (e) {
+                                alert("Failed to execute command.");
+                              }
+                            }
+                          }}
+                            className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors text-nowrap">
+                            TERMINAL
                           </button>
                         </div>
                       </div>
@@ -447,23 +513,28 @@ function App() {
                   </tr>
                 </thead>
                 <tbody>
-                  {[
-                    { name: 'Project_Alpha_Final_v2.pdf', size: '4.2 MB / PDF', peer: 'Pixel 9 Pro', status: 'ACTIVE' },
-                    { name: 'Brand_Identity_System.fig', size: '12.8 MB / FIG', peer: 'MacBook Studio', status: 'ACTIVE' },
-                    { name: 'Q4_Market_Analysis.xlsx', size: '1.1 MB / XLSX', peer: 'iPhone 15', status: 'INACTIVE' },
-                  ].map((item, i) => (
-                    <tr key={i} className="group hover:bg-wash transition-colors">
-                      <td className="font-bold text-sm tracking-tight">{item.name}</td>
-                      <td className="mono text-[11px] text-black/50">{item.size}</td>
-                      <td className="text-sm font-medium">{item.peer}</td>
-                      <td>
-                        <div className="flex items-center gap-2">
-                          <span className={`w-1.5 h-1.5 rounded-full ${item.status === 'ACTIVE' ? 'bg-black' : 'border border-black'}`} />
-                          <span className={item.status === 'ACTIVE' ? 'text-black' : 'text-black/30'}>{item.status}</span>
-                        </div>
+                  {(!Array.isArray(transfers) || transfers.length === 0) ? (
+                    <tr>
+                      <td colSpan="4" className="py-20 text-center">
+                        <span className="material-symbols-outlined text-4xl text-black/10 block mb-2">share</span>
+                        <p className="text-black/30 text-sm">No active file distribution detected.</p>
                       </td>
                     </tr>
-                  ))}
+                  ) : (
+                    transfers.map((item, i) => (
+                      <tr key={i} className="group hover:bg-wash transition-colors">
+                        <td className="font-bold text-sm tracking-tight">{item.name}</td>
+                        <td className="mono text-[11px] text-black/50">{item.size}</td>
+                        <td className="text-sm font-medium">{item.peer}</td>
+                        <td>
+                          <div className="flex items-center gap-2">
+                            <span className={`w-1.5 h-1.5 rounded-full ${item.status === 'ACTIVE' ? 'bg-black' : 'border border-black'}`} />
+                            <span className={item.status === 'ACTIVE' ? 'text-black' : 'text-black/30'}>{item.status}</span>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
               </table>
             </div>

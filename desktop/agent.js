@@ -25,6 +25,7 @@ const http = require('http');
 const crypto = require('crypto');
 const { WebSocketServer, WebSocket } = require('ws');
 const { Bonjour } = require('bonjour-service');
+const { execSync, exec } = require('child_process');
 
 // ═══════════════════════════════════════════════════
 //  DEVICE IDENTITY
@@ -256,17 +257,38 @@ function registerDeviceHandlers(router) {
 //  CLIPBOARD HANDLER
 // ═══════════════════════════════════════════════════
 function registerClipboardHandlers(router) {
-    let clipboardCache = '';
-
     router.register('clipboard', 'get', async () => {
-        // In Electron, we'd use clipboard.readText()
-        // For standalone mode, return cached value
-        return { text: clipboardCache };
+        try {
+            // Mac-specific: pbpaste
+            const text = execSync('pbpaste').toString();
+            return { text };
+        } catch {
+            return { text: '' };
+        }
     });
 
     router.register('clipboard', 'set', async (msg) => {
-        clipboardCache = msg.payload.text || '';
-        return { success: true };
+        const text = msg.payload.text || '';
+        try {
+            // Mac-specific: pbcopy
+            execSync(`echo "${text.replace(/"/g, '\\"')}" | pbcopy`);
+            return { success: true };
+        } catch {
+            return { success: false };
+        }
+    });
+
+    router.register('shell', 'run', async (msg) => {
+        const command = msg.payload.command;
+        return new Promise((resolve) => {
+            exec(command, (error, stdout, stderr) => {
+                resolve({
+                    stdout: stdout || '',
+                    stderr: stderr || '',
+                    code: error ? error.code : 0
+                });
+            });
+        });
     });
 }
 
@@ -359,6 +381,23 @@ class DeviceAgent {
         registerClipboardHandlers(this.router);
         registerMirrorHandlers(this.router, this.peerRegistry, this.mirrorCallback);
         registerControlHandlers(this.router, this.peerRegistry);
+
+        this.router.register('device', 'status', () => {
+            const freeMem = os.freemem();
+            const totalMem = os.totalmem();
+            return {
+                ram: {
+                    total: totalMem,
+                    free: freeMem,
+                    used: totalMem - freeMem,
+                    percent: Math.round(((totalMem - freeMem) / totalMem) * 100)
+                },
+                platform: os.platform(),
+                release: os.release(),
+                uptime: os.uptime(),
+                timestamp: Date.now()
+            };
+        });
     }
 
     // Start the agent (both server + discovery)
@@ -371,12 +410,30 @@ class DeviceAgent {
             const remoteIp = req.socket.remoteAddress;
             console.log(`[Agent] Incoming connection from ${remoteIp}`);
 
+            let pendingFile = null;
+
             ws.on('message', async (raw) => {
-                try {
-                    const msg = JSON.parse(raw.toString());
-                    await this._handleMessage(msg, ws);
-                } catch (err) {
-                    console.error('[Agent] Bad message:', err.message);
+                if (typeof raw === 'string' || Buffer.isBuffer(raw)) {
+                    try {
+                        const str = raw.toString();
+                        if (str.startsWith('{')) {
+                            const msg = JSON.parse(str);
+                            if (msg.action === 'transfer') {
+                                pendingFile = msg.payload;
+                                console.log(`[Agent] Receiving real file: ${pendingFile.name}...`);
+                                return;
+                            }
+                            await this._handleMessage(msg, ws);
+                        } else if (pendingFile) {
+                            // Binary chunk for the pending file
+                            const filePath = path.join(this.uploadsDir, pendingFile.name);
+                            fs.writeFileSync(filePath, raw);
+                            console.log(`[Agent] Saved real file: ${pendingFile.name} to disk.`);
+                            pendingFile = null;
+                        }
+                    } catch (err) {
+                        console.error('[Agent] Real-world data error:', err.message);
+                    }
                 }
             });
 

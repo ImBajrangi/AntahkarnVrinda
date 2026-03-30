@@ -23,111 +23,85 @@ import java.nio.ByteBuffer
  * Streams video chunks back to the requester via WebSocket.
  */
 class ScreenCaptureHandler(private val context: Context, private val service: DeviceAgentService) {
-
     private var mediaProjection: MediaProjection? = null
     private var virtualDisplay: VirtualDisplay? = null
-    private var encoder: MediaCodec? = null
-    private var inputSurface: Surface? = null
-    
+    private var imageReader: android.media.ImageReader? = null
     private var isStreaming = false
-    private var handlerThread: HandlerThread? = null
-    private var handler: Handler? = null
+    private var handlerThread: android.os.HandlerThread? = null
+    private var handler: android.os.Handler? = null
 
     private val WIDTH = 720
     private val HEIGHT = 1280
-    private val BITRATE = 2000000 // 2Mbps
-    private val FRAME_RATE = 30
-    private val I_FRAME_INTERVAL = 1
 
-    fun start(resultCode: Int, data: Intent) {
+    fun start(resultCode: Int, data: android.content.Intent) {
         if (isStreaming) return
-        
-        Log.i("ScreenCapture", "Starting screen capture...")
-        val mpManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        val mpManager = context.getSystemService(Context.MEDIA_PROJECTION_SERVICE) as android.media.projection.MediaProjectionManager
         mediaProjection = mpManager.getMediaProjection(resultCode, data)
-        
-        setupEncoder()
-        setupVirtualDisplay()
-        
+        setupCapture()
         isStreaming = true
-        startEncodingLoop()
+        Log.i("ScreenCapture", "Started JPEG capture via ImageReader")
     }
 
-    private fun setupEncoder() {
-        val format = MediaFormat.createVideoFormat(MediaFormat.MIMETYPE_VIDEO_AVC, WIDTH, HEIGHT)
-        format.setInteger(MediaFormat.KEY_COLOR_FORMAT, MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface)
-        format.setInteger(MediaFormat.KEY_BIT_RATE, BITRATE)
-        format.setInteger(MediaFormat.KEY_FRAME_RATE, FRAME_RATE)
-        format.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, I_FRAME_INTERVAL)
+    private fun setupCapture() {
+        handlerThread = android.os.HandlerThread("CaptureThread")
+        handlerThread?.start()
+        handler = android.os.Handler(handlerThread!!.looper)
 
-        encoder = MediaCodec.createEncoderByType(MediaFormat.MIMETYPE_VIDEO_AVC)
-        encoder?.configure(format, null, null, MediaCodec.CONFIGURE_FLAG_ENCODE)
-        inputSurface = encoder?.createInputSurface()
-        encoder?.start()
-    }
-
-    private fun setupVirtualDisplay() {
+        imageReader = android.media.ImageReader.newInstance(WIDTH, HEIGHT, android.graphics.PixelFormat.RGBA_8888, 2)
         val metrics = context.resources.displayMetrics
         virtualDisplay = mediaProjection?.createVirtualDisplay(
-            "ScreenCapture",
-            WIDTH, HEIGHT, metrics.densityDpi,
-            DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
-            inputSurface, null, null
+            "ScreenCapture", WIDTH, HEIGHT, metrics.densityDpi,
+            android.hardware.display.DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
+            imageReader?.surface, null, null
         )
-    }
 
-    private fun startEncodingLoop() {
-        handlerThread = HandlerThread("ScreenEncoder")
-        handlerThread?.start()
-        handler = Handler(handlerThread!!.looper)
-
-        handler?.post(object : Runnable {
-            override fun run() {
-                if (!isStreaming) return
-
-                val bufferInfo = MediaCodec.BufferInfo()
-                val outputBufferIndex = encoder?.dequeueOutputBuffer(bufferInfo, 10000) ?: -1
-
-                if (outputBufferIndex >= 0) {
-                    val outputBuffer = encoder?.getOutputBuffer(outputBufferIndex)
-                    if (outputBuffer != null) {
-                        sendFrame(outputBuffer, bufferInfo)
-                    }
-                    encoder?.releaseOutputBuffer(outputBufferIndex, false)
-                }
-
-                handler?.post(this)
+        imageReader?.setOnImageAvailableListener({ reader ->
+            val image = reader.acquireLatestImage() ?: return@setOnImageAvailableListener
+            try {
+                processImage(image)
+            } catch (e: Exception) {
+                Log.e("ScreenCapture", "Image process error: ${e.message}")
+            } finally {
+                image.close()
             }
-        })
+        }, handler)
     }
 
-    private fun sendFrame(buffer: ByteBuffer, info: MediaCodec.BufferInfo) {
-        val data = ByteArray(info.size)
-        buffer.get(data)
+    private fun processImage(image: android.media.Image) {
+        // Simple JPEG compression from Surface Image
+        val planes = image.planes
+        val buffer = planes[0].buffer
+        val pixelStride = planes[0].pixelStride
+        val rowStride = planes[0].rowStride
+        val rowPadding = rowStride - pixelStride * WIDTH
         
-        // Convert to base64 for JSON protocol
-        val base64Frame = android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP)
+        val bitmap = android.graphics.Bitmap.createBitmap(
+            WIDTH + rowPadding / pixelStride, HEIGHT, android.graphics.Bitmap.Config.ARGB_8888
+        )
+        bitmap.copyPixelsFromBuffer(buffer)
         
-        // Broadcast to all peers (or a specific one if implemented)
-        service.broadcastToPeers("mirror", "frame", JSONObject().apply {
+        // Crop if needed or just scale
+        val outStream = java.io.ByteArrayOutputStream()
+        bitmap.compress(android.graphics.Bitmap.CompressFormat.JPEG, 70, outStream)
+        val jpegData = outStream.toByteArray()
+        
+        val base64Frame = android.util.Base64.encodeToString(jpegData, android.util.Base64.NO_WRAP)
+        
+        service.broadcastToPeers("mirror", "frame", org.json.JSONObject().apply {
             put("data", base64Frame)
-            put("timestamp", info.presentationTimeUs)
-            put("flags", info.flags)
+            put("timestamp", System.currentTimeMillis())
         })
     }
 
     fun stop() {
-        Log.i("ScreenCapture", "Stopping screen capture...")
         isStreaming = false
         handlerThread?.quitSafely()
-        
         virtualDisplay?.release()
+        imageReader?.close()
         mediaProjection?.stop()
-        encoder?.stop()
-        encoder?.release()
-        
         virtualDisplay = null
+        imageReader = null
         mediaProjection = null
-        encoder = null
+        Log.i("ScreenCapture", "Stopped JPEG capture")
     }
 }
