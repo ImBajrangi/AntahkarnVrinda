@@ -1,148 +1,207 @@
-import QtQuick 2.15
-import QtQuick.Controls 2.15
-import QtQuick.Layouts 1.15
-import QtQuick.Window 2.15
+import QtQuick
+import QtQuick.Window
+import QtQuick.Controls
+import QtQuick.Layouts
+import com.antahkarn.vrinda
 
 Window {
-    id: mainRoot
-    width: 1000
+    id: window
+    width: 1280
     height: 800
     visible: true
-    title: "AntahkarnVrinda | Professional Core"
-    color: "#F7F7F5" // Notion Base White
+    title: "AntahkarnVrinda // Tactical Agent"
+    // Window-level styling (Font will be set on child text components)
+    color: "#131313"
 
-    // ═══ CUSTOM DESIGN TOKENS ═══
-    property color colorText: "#000000"
-    property color colorAccent: "#000000"
-    property color colorWash: "#FFFFFF"
-    property int radiusCard: 12
+    // Background Grid
+    Canvas {
+        anchors.fill: parent
+        onPaint: {
+            var ctx = getContext("2d");
+            ctx.strokeStyle = "rgba(133, 149, 137, 0.05)";
+            ctx.lineWidth = 1;
+            for (var x = 0; x < width; x += 100) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, height); ctx.stroke();
+            }
+            for (var y = 0; y < height; y += 100) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(width, y); ctx.stroke();
+            }
+        }
+    }
 
-    ColumnLayout {
+    RowLayout {
         anchors.fill: parent
         spacing: 0
 
-        // ═══ TOP NAVBAR ═══
-        Rectangle {
+        // ════ MAIN VIEWPORT ════
+        Item {
             Layout.fillWidth: true
-            height: 60
-            color: "#FFFFFF"
-            border.color: "#000000"
-            border.width: 1
+            Layout.fillHeight: true
 
-            RowLayout {
+            ColumnLayout {
                 anchors.fill: parent
-                anchors.leftMargin: 20
-                anchors.rightMargin: 20
-                spacing: 40
+                anchors.margins: 40
+                spacing: 20
 
-                Text {
-                    text: "AntahkarnVrinda"
-                    font.pixelSize: 18
-                    font.bold: true
-                    letterSpacing: -0.5
-                }
-
-                Row {
+                // Header
+                RowLayout {
                     Layout.fillWidth: true
-                    spacing: 30
-                    Repeater {
-                        model: ["Radar", "Shared", "History", "Settings"]
+                    
+                    Text {
+                        text: "SYSTEM STATUS: " + mirrorClient.status.toUpperCase()
+                        color: "#50FFB0"
+                        font.pixelSize: 24
+                        font.bold: true
+                        font.family: "Space Grotesk"
+                        font.letterSpacing: -1
+                    }
+                    
+                    Item { Layout.fillWidth: true }
+                    
+                    Rectangle {
+                        width: 100; height: 30
+                        color: "#201f1f"
                         Text {
-                            text: modelData
-                            font.pixelSize: 14
-                            font.weight: modelData === "Radar" ? Font.Bold : Font.Normal
-                            opacity: modelData === "Radar" ? 1 : 0.4
-                            MouseArea {
-                                anchors.fill: parent
-                                cursorShape: Qt.PointingHandCursor
-                            }
+                            anchors.centerIn: parent
+                            text: "NODE 0xAF4"
+                            color: "#859589"
+                            font.pixelSize: 12
+                            font.bold: true
                         }
                     }
                 }
 
-                // Node Badge
-                Rectangle {
-                    width: 120
-                    height: 32
-                    radius: 6
-                    border.color: "#000000"
-                    color: "transparent"
-                    RowLayout {
-                        anchors.centerIn: parent
-                        spacing: 8
-                        Rectangle {
-                            width: 8; height: 8; radius: 4; color: "#22C55E"
+                // Mirror View
+                MirrorView {
+                    id: mirrorView
+                    Layout.fillWidth: true
+                    Layout.fillHeight: true
+                    clip: true
+                }
+
+                // Footer Controls
+                RowLayout {
+                    Layout.fillWidth: true
+                    spacing: 20
+                    
+                    Button {
+                        text: "START SCAN"
+                        onClicked: mirrorClient.startDiscovery()
+                        background: Rectangle {
+                            color: parent.down ? "#2a2a2a" : "#201f1f"
+                            border.color: "#50FFB0"
+                            border.width: 1
                         }
-                        Text { text: "Studio Core"; font.pixelSize: 11; font.bold: true }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#50FFB0"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                        }
+                    }
+
+                    Button {
+                        text: "STOP STREAM"
+                        onClicked: mirrorClient.stopMirroring()
+                        background: Rectangle {
+                            color: parent.down ? "#2a2a2a" : "#201f1f"
+                            border.color: "#353534"
+                            border.width: 1
+                        }
+                        contentItem: Text {
+                            text: parent.text
+                            color: "#859589"
+                            horizontalAlignment: Text.AlignHCenter
+                            verticalAlignment: Text.AlignVCenter
+                            font.bold: true
+                        }
                     }
                 }
             }
         }
 
-        // ═══ MAIN CONTENT AREA ═══
-        Item {
-            Layout.fillWidth: true
+        // ════ SIDEBAR: TELEMETRY ════
+        Rectangle {
+            Layout.preferredWidth: 320
             Layout.fillHeight: true
+            color: "#1c1b1b"
+            border.color: "#353534"
+            border.width: 1
 
-            // Radar Scanning Interface (The "Disturbance" fix + Pro Look)
             ColumnLayout {
                 anchors.fill: parent
-                anchors.margins: 40
-                spacing: 40
+                anchors.margins: 20
+                spacing: 30
 
-                RowLayout {
-                    Layout.fillWidth: true
-                    Text {
-                        text: "RADAR SCANNING"
-                        font.pixelSize: 48
-                        font.bold: true
-                        font.family: "Inter"
-                        letterSpacing: -2
-                    }
-                    Rectangle {
-                        Layout.fillWidth: true; height: 2; color: "#000000"
-                    }
+                Text {
+                    text: "TELEMETRY"
+                    color: "#00FFFF"
+                    font.pixelSize: 14
+                    font.bold: true
                 }
 
-                // Grid of Devices
-                GridLayout {
-                    columns: 4
-                    rowSpacing: 20
-                    columnSpacing: 20
+                // Peer List
+                ListView {
+                    id: peerListView
                     Layout.fillWidth: true
-
-                    // Placeholder Node
-                    Rectangle {
-                        width: 220
-                        height: 280
-                        radius: radiusCard
-                        border.color: "#000000"
-                        border.width: 2
-                        color: "#FFFFFF"
-
-                        ColumnLayout {
-                            anchors.centerIn: parent
-                            spacing: 15
-                            Image {
-                                source: "https://vrindopnishad.in/assets/phone_frame.png" // Mock
-                                width: 64; height: 64; fillMode: Image.PreserveAspectFit
-                            }
-                            Text { text: "PIXEL 9 PRO"; font.pixelSize: 16; font.bold: true; Layout.alignment: Qt.AlignHCenter }
-                            Text { text: "ANDROID 14"; font.pixelSize: 10; opacity: 0.4; Layout.alignment: Qt.AlignHCenter }
-                            
-                            Button {
-                                text: "MIRROR STREAM"
-                                flat: true
-                                font.bold: true
-                                background: Rectangle {
-                                    border.color: "#000000"
-                                    color: parent.hovered ? "#000000" : "transparent"
-                                }
-                                contentItem: Text { text: parent.text; color: parent.hovered ? "#FFFFFF" : "#000000"; font.bold: true; horizontalAlignment: Text.AlignHCenter }
-                            }
+                    Layout.fillHeight: true
+                    model: mirrorClient.peers
+                    delegate: ItemDelegate {
+                        width: parent.width
+                        height: 60
+                        onClicked: {
+                            mirrorClient.connectToPeer(modelData.ip, modelData.port);
+                            mirrorClient.startMirroring();
+                        }
+                        
+                        background: Rectangle {
+                            color: parent.hovered ? "#0D00FFFF" : "transparent"
+                        }
+                        
+                        contentItem: Column {
+                            Text { text: modelData.name; color: "#e5e2e1"; font.bold: true }
+                            Text { text: modelData.ip + ":" + modelData.port; color: "#859589"; font.pixelSize: 10 }
                         }
                     }
                 }
+
+                // Hardware Stats (Static Mockup for HUD feel)
+                Column {
+                    Layout.fillWidth: true
+                    spacing: 15
+                    
+                    TelemetryItem { label: "CPU LOAD"; value: "14.2%"; barValue: 0.14 }
+                    TelemetryItem { label: "MEM USAGE"; value: "2.4 GB"; barValue: 0.3 }
+                    TelemetryItem { label: "NET MESH"; value: "92 ms"; barValue: 0.8 }
+                }
+            }
+        }
+    }
+
+    // Helper component for Telemetry items
+    component TelemetryItem : Column {
+        property string label: ""
+        property string value: ""
+        property real barValue: 0.0
+        width: parent.width
+        spacing: 5
+        
+        Row {
+            width: parent.width
+            Text { text: label; color: "#859589"; font.pixelSize: 10; font.bold: true }
+            Item { width: 1; height: 1; Layout.fillWidth: true }
+            Text { text: value; color: "#50FFB0"; font.pixelSize: 10; font.bold: true; anchors.right: parent.right }
+        }
+        
+        Rectangle {
+            width: parent.width
+            height: 2
+            color: "#2a2a2a"
+            Rectangle {
+                width: parent.width * barValue
+                height: parent.height
+                color: "#50FFB0"
             }
         }
     }

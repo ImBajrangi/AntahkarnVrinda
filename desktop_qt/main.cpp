@@ -15,8 +15,10 @@ int main(int argc, char *argv[])
     // Register MirrorClient as a QML Type
     MirrorClient mirrorClient;
     engine.rootContext()->setContextProperty("mirrorClient", &mirrorClient);
+    engine.addImageProvider(QLatin1String("mirror"), mirrorClient.imageProvider());
 
-    const QUrl url(u"qrc:/com.antahkarn.vrinda/main.qml"_qs);
+    // using namespace Qt::StringLiterals;
+    const QUrl url(u"qrc:/com/antahkarn/vrinda/main.qml"_s);
     QObject::connect(&engine, &QQmlApplicationEngine::objectCreated,
         &app, [url](QObject *obj, const QUrl &objUrl) {
             if (!obj && url == objUrl)
