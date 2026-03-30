@@ -50,6 +50,13 @@ function startServer(uploadsDir, staticDistDir, port = 3000) {
         socket.on('disconnect', () => {
             console.log(`[Socket] Disconnected: ${socket.id}`);
         });
+
+        // === WebRTC Signaling ===
+        socket.on('webrtc_signal', (data) => {
+            // Forward signal to the target peer
+            // data: { to, type, sdp, candidate }
+            io.emit('webrtc_signal_forward', data);
+        });
     });
 
     // === 2. FILE TRANSFER over Express ===

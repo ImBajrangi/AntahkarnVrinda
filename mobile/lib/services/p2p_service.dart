@@ -4,6 +4,7 @@ import 'package:nsd/nsd.dart';
 import 'package:socket_io_client/socket_io_client.dart' as io;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' as foundation;
+import 'mirror_service.dart';
 import '../models/peer.dart';
 
 class P2pService {
@@ -37,6 +38,19 @@ class P2pService {
     );
 
     debugPrint('Registered as $deviceName on mDNS');
+  }
+
+  Future<void> startMirroring(Peer target) async {
+    final peerUrl = 'http://${target.ip}:${target.port}';
+    final socket = io.io(peerUrl, <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': false,
+    });
+    
+    socket.connect();
+    socket.onConnect((_) {
+      MirrorService().startMirroring(socket, 'desktop');
+    });
   }
 
   Future<void> sendFiles(List<File> files, Peer target) async {

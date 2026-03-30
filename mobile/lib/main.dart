@@ -401,15 +401,32 @@ class RadarView extends StatelessWidget {
         ),
         Container(
           margin: const EdgeInsets.only(top: 4),
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
-          color: Colors.black,
-          child: Text(
-            peer.name.toUpperCase(),
-            style: GoogleFonts.jetBrainsMono(
-              color: Colors.white,
-              fontSize: 8,
-              fontWeight: FontWeight.bold,
-            ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                color: Colors.black,
+                child: Text(
+                  peer.name.toUpperCase(),
+                  style: GoogleFonts.jetBrainsMono(
+                    color: Colors.white,
+                    fontSize: 8,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              if (peer.type == 'desktop' || peer.name.contains('MAC') || peer.name.contains('PC'))
+                GestureDetector(
+                  onTap: () => P2pService().startMirroring(peer),
+                  child: Container(
+                    margin: const EdgeInsets.only(left: 4),
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    color: const Color(0xFF2B5CE7),
+                    child: const Icon(Icons.visibility, color: Colors.white, size: 8),
+                  ),
+                ),
+            ],
           ),
         ),
       ],

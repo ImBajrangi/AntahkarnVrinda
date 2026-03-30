@@ -71,13 +71,78 @@ function App() {
   const [selectedPeerTarget, setSelectedPeerTarget] = useState(null);
 
   const fileInputRef = useRef(null);
+  const [mirroringPeer, setMirroringPeer] = useState(null);
+  const [remoteStream, setRemoteStream] = useState(null);
+  const peerConnectionRef = useRef(null);
+  const dataChannelRef = useRef(null);
+  const videoRef = useRef(null);
 
   useEffect(() => {
     fetch(`${API_URL}/api/identity`).then(r => r.json()).then(setIdentity).catch(() => { });
     fetchFiles();
     socket.on('files_updated', () => { fetchFiles(); setStatusMsg({ text: 'New file received!', type: 'success' }); });
-    return () => socket.off('files_updated');
-  }, []);
+    
+    // WebRTC Signaling Listener
+    socket.on('webrtc_signal_forward', async (data) => {
+      if (data.to !== identity.id && data.to !== 'desktop') return;
+      
+      if (data.type === 'offer') {
+        const pc = createPeerConnection();
+        await pc.setRemoteDescription(new RTCSessionDescription({ sdp: data.sdp, type: 'offer' }));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('webrtc_signal', { to: data.fromId, type: 'answer', sdp: answer.sdp });
+      } else if (data.type === 'candidate') {
+        if (peerConnectionRef.current) {
+          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+        }
+      }
+    });
+
+    return () => {
+      socket.off('files_updated');
+      socket.off('webrtc_signal_forward');
+    };
+  }, [identity.id]);
+
+  const createPeerConnection = () => {
+    const pc = new RTCPeerConnection({
+      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    });
+
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit('webrtc_signal', { to: mirroringPeer?.id || 'mobile', type: 'candidate', candidate: event.candidate });
+      }
+    };
+
+    pc.ontrack = (event) => {
+      setRemoteStream(event.streams[0]);
+    };
+
+    pc.ondatachannel = (event) => {
+      dataChannelRef.current = event.channel;
+    };
+
+    peerConnectionRef.current = pc;
+    return pc;
+  };
+
+  const stopMirroring = () => {
+    peerConnectionRef.current?.close();
+    peerConnectionRef.current = null;
+    dataChannelRef.current = null;
+    setRemoteStream(null);
+    setMirroringPeer(null);
+  };
+
+  const handleRemoteClick = (e) => {
+    if (!dataChannelRef.current || !videoRef.current) return;
+    const rect = videoRef.current.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 1080; // Assuming 1080p target
+    const y = ((e.clientY - rect.top) / rect.height) * 1920; // Assuming 1920p target
+    dataChannelRef.current.send(`tap:${x},${y}`);
+  };
 
   useEffect(() => {
     const fetchPeers = () => fetch(`${API_URL}/api/peers`).then(r => r.json()).then(setPeers).catch(() => { });
@@ -494,6 +559,39 @@ function App() {
           <span className="mono text-[9px] font-bold uppercase">Settings</span>
         </button>
       </nav>
+
+      {/* ═══ MIRRORING OVERLAY ═══ */}
+      {remoteStream && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-10 animate-in fade-in duration-300">
+          <div className="bg-canvas border-2 border-black rounded-card shadow-2xl overflow-hidden flex flex-col max-h-full">
+            <div className="h-12 bg-black text-white px-4 flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="material-symbols-outlined text-sm">visibility</span>
+                <span className="font-heading font-bold text-sm tracking-tight">{mirroringPeer?.name || 'Device'} Mirror</span>
+              </div>
+              <button onClick={stopMirroring} className="hover:bg-white/20 p-1 rounded transition-colors">
+                <span className="material-symbols-outlined">close</span>
+              </button>
+            </div>
+            <div className="relative bg-black flex-1 flex items-center justify-center overflow-hidden" 
+                 style={{ aspectRatio: '9/16', maxHeight: 'calc(90vh - 48px)' }}>
+              <video 
+                ref={videoRef}
+                autoPlay 
+                playsInline 
+                srcObject={remoteStream} 
+                onClick={handleRemoteClick}
+                className="max-w-full max-h-full cursor-crosshair"
+              />
+              <div className="absolute bottom-4 left-4 right-4 flex justify-between items-center opacity-0 hover:opacity-100 transition-opacity">
+                <div className="bg-black/50 backdrop-blur px-3 py-1 rounded-full text-white mono text-[10px] font-bold">
+                  CONTROL ACTIVE
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hidden file input */}
       <input type="file" multiple className="hidden" ref={fileInputRef} onChange={(e) => {
