@@ -10,11 +10,11 @@ import 'models/peer.dart';
 import 'widgets/radar_painter.dart';
 
 void main() {
-  runApp(const LocalShareApp());
+  runApp(const VrindaApp());
 }
 
-class LocalShareApp extends StatelessWidget {
-  const LocalShareApp({super.key});
+class VrindaApp extends StatelessWidget {
+  const VrindaApp({super.key});
 
   @override
   Widget build(BuildContext context) {

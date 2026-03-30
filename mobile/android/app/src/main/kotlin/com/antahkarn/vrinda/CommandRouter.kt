@@ -1,4 +1,4 @@
-package com.localshare.mobile
+package com.antahkarn.vrinda
 
 import android.util.Log
 import org.json.JSONObject

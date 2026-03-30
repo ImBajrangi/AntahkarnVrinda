@@ -13,7 +13,7 @@ class MirrorService {
   RTCDataChannel? _dataChannel;
   io.Socket? _socket;
 
-  final _controlChannel = const MethodChannel('com.antahkarn.vrinda/control');
+  final _controlChannel = const MethodChannel('com.antahkarn.vrinda/agent');
 
   Future<void> startMirroring(io.Socket socket, String targetPeerId) async {
     _socket = socket;
