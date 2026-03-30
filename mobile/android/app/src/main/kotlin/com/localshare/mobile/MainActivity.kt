@@ -1,17 +1,41 @@
 package com.localshare.mobile
 
+import android.content.Intent
+import android.os.Build
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import android.util.Log
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.localshare.mobile/control"
+    private val CHANNEL = "com.antahkarn.vrinda/agent"
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // Start the Device Agent background service
+        val agentIntent = Intent(this, DeviceAgentService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(agentIntent)
+        } else {
+            startService(agentIntent)
+        }
+        Log.i("MainActivity", "Device Agent service started")
+
+        // Flutter ↔ Kotlin bridge
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
+                "getAgentStatus" -> {
+                    val agentRunning = DeviceAgentService.instance != null
+                    val controlServiceRunning = ControlService.instance != null
+                    result.success(mapOf(
+                        "agentRunning" to agentRunning,
+                        "controlServiceRunning" to controlServiceRunning,
+                        "deviceId" to (DeviceAgentService.DEVICE_ID),
+                        "port" to DeviceAgentService.AGENT_PORT,
+                        "peers" to (DeviceAgentService.instance?.getConnectedPeers() ?: emptyList<Any>())
+                    ))
+                }
                 "tap" -> {
                     val x = call.argument<Double>("x")?.toFloat() ?: 0f
                     val y = call.argument<Double>("y")?.toFloat() ?: 0f
@@ -27,12 +51,7 @@ class MainActivity : FlutterActivity() {
                     ControlService.instance?.swipe(x1, y1, x2, y2, duration)
                     result.success(true)
                 }
-                "check_service" -> {
-                    result.success(ControlService.instance != null)
-                }
-                else -> {
-                    result.notImplemented()
-                }
+                else -> result.notImplemented()
             }
         }
     }

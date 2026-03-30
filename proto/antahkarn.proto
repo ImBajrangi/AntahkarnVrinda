@@ -1,0 +1,90 @@
+syntax = "proto3";
+
+package antahkarn;
+
+option java_package = "com.antahkarn.vrinda.proto";
+option java_multiple_files = true;
+
+// ═══ Device Management Service ═══
+service DeviceService {
+  rpc RegisterDevice(DeviceInfo) returns (RegisterResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}
+
+// ═══ Screen Mirroring Service ═══
+service MirrorService {
+  rpc StreamScreen(stream ScreenChunk) returns (StreamStatus);
+  rpc SendControlEvent(ControlEvent) returns (EventStatus);
+}
+
+// ═══ File Distribution Service ═══
+service FileService {
+  rpc PushFile(stream FileChunk) returns (TransferStatus);
+  rpc ListFiles(ListRequest) returns (FileList);
+}
+
+message DeviceInfo {
+  string device_id = 1;
+  string name = 2;
+  string type = 3;
+  string ip = 4;
+  int32 port = 5;
+}
+
+message RegisterResponse {
+  bool success = 1;
+  string auth_token = 2;
+}
+
+message HeartbeatRequest {
+  string device_id = 1;
+}
+
+message HeartbeatResponse {
+  bool active = 1;
+}
+
+message ScreenChunk {
+  bytes data = 1;
+  int64 timestamp = 2;
+  int32 sequence = 3;
+}
+
+message StreamStatus {
+  bool ok = 1;
+}
+
+message ControlEvent {
+  string type = 1;
+  float x = 2;
+  float y = 3;
+  int32 key_code = 4;
+}
+
+message EventStatus {
+  bool processed = 1;
+}
+
+message FileChunk {
+  string name = 1;
+  bytes data = 2;
+  int64 size = 3;
+}
+
+message ListRequest {
+  string dir = 1;
+}
+
+message FileList {
+  repeated FileInfo files = 1;
+}
+
+message FileInfo {
+  string name = 1;
+  int64 size = 2;
+  int64 last_modified = 3;
+}
+
+message TransferStatus {
+  bool success = 1;
+}

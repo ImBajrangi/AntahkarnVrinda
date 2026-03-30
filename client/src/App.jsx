@@ -1,35 +1,124 @@
-import React, { useState, useCallback, useRef, useEffect, Component } from 'react';
-import { io } from 'socket.io-client';
+import React, { useState, useRef, useEffect, Component } from 'react';
 
-const getApiUrl = () => {
-  if (import.meta.env.PROD) return '';
-  if (typeof window !== 'undefined' && (window.location.port === '3000' || window.location.port === '3001')) {
-    return `${window.location.protocol}//${window.location.hostname}:${window.location.port}`;
+// ═══════════════════════════════════════════════════
+//  AGENT BRIDGE — Works in Electron (preload) or Browser (WebSocket)
+// ═══════════════════════════════════════════════════
+const isElectron = typeof window !== 'undefined' && !!window.agent;
+
+class AgentBridge {
+  constructor() {
+    this.ws = null;
+    this.listeners = new Map();
+    this.pendingCallbacks = new Map();
+    this.peers = [];
+    this.identity = { id: '', name: 'Connecting...', type: 'desktop' };
   }
-  return 'http://localhost:3000';
-};
-const API_URL = getApiUrl();
-const socket = io(API_URL);
 
+  async connect() {
+    if (isElectron) {
+      this.identity = await window.agent.getIdentity();
+      this.peers = await window.agent.getPeers();
+      window.agent.onPeersUpdated((peers) => {
+        this.peers = peers;
+        this._emit('peers', peers);
+      });
+      window.agent.onMirrorEvent((event) => {
+        this._emit('mirror', event);
+      });
+    } else {
+      // Browser mode — connect to agent's WebSocket directly
+      const wsUrl = `ws://${window.location.hostname}:8765`;
+      this.ws = new WebSocket(wsUrl);
+      this.ws.onopen = () => {
+        console.log('[Bridge] Connected to agent');
+        this._send('device', 'identify', {
+          deviceId: 'browser-' + Math.random().toString(36).slice(2),
+          deviceName: 'Browser Client',
+          deviceType: 'browser'
+        });
+      };
+      this.ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          this._handleMessage(msg);
+        } catch {}
+      };
+      this.ws.onerror = () => console.warn('[Bridge] WebSocket error');
+      this.ws.onclose = () => {
+        console.warn('[Bridge] Disconnected, retrying in 3s...');
+        setTimeout(() => this.connect(), 3000);
+      };
+    }
+  }
+
+  _send(category, action, payload = {}, to = null) {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      const id = crypto.randomUUID();
+      this.ws.send(JSON.stringify({
+        type: 'command', category, action, from: this.identity.id,
+        to, payload, id, timestamp: Date.now()
+      }));
+      return id;
+    }
+  }
+
+  _handleMessage(msg) {
+    if (msg.type === 'response') {
+      const cb = this.pendingCallbacks.get(msg.replyTo);
+      if (cb) { cb(msg.payload); this.pendingCallbacks.delete(msg.replyTo); }
+    }
+    if (msg.category === 'device' && msg.action === 'identify') {
+      // We were asked to identify
+    }
+  }
+
+  async getIdentity() {
+    if (isElectron) return window.agent.getIdentity();
+    return this.identity;
+  }
+
+  async getPeers() {
+    if (isElectron) return window.agent.getPeers();
+    return this.peers;
+  }
+
+  async listFiles() {
+    if (isElectron) return window.agent.listFiles();
+    return [];
+  }
+
+  async sendCommand(peerId, category, action, payload) {
+    if (isElectron) return window.agent.sendCommand(peerId, category, action, payload);
+    this._send(category, action, payload, peerId);
+  }
+
+  on(event, callback) {
+    if (!this.listeners.has(event)) this.listeners.set(event, []);
+    this.listeners.get(event).push(callback);
+  }
+
+  _emit(event, data) {
+    const cbs = this.listeners.get(event) || [];
+    cbs.forEach(cb => cb(data));
+  }
+}
+
+const bridge = new AgentBridge();
+
+// ═══════════════════════════════════════════════════
+//  UTILITY
+// ═══════════════════════════════════════════════════
 function formatBytes(bytes, decimals = 1) {
   if (!+bytes) return '0 B';
-  const k = 1024;
-  const dm = decimals < 0 ? 0 : decimals;
+  const k = 1024, dm = Math.max(0, decimals);
   const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
   return `${parseFloat((bytes / Math.pow(k, i)).toFixed(dm))} ${sizes[i]}`;
 }
 
-// SVG Device Icons matching the template aesthetic (line-art style)
-function LaptopIcon({ className = '' }) {
-  return (
-    <svg className={className} viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5">
-      <rect x="8" y="8" width="32" height="24" rx="2" />
-      <line x1="4" y1="36" x2="44" y2="36" />
-      <line x1="18" y1="32" x2="30" y2="36" />
-    </svg>
-  );
-}
+// ═══════════════════════════════════════════════════
+//  DEVICE ICONS
+// ═══════════════════════════════════════════════════
 function PhoneIcon({ className = '' }) {
   return (
     <svg className={className} viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5">
@@ -39,18 +128,23 @@ function PhoneIcon({ className = '' }) {
     </svg>
   );
 }
+function LaptopIcon({ className = '' }) {
+  return (
+    <svg className={className} viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5">
+      <rect x="8" y="8" width="32" height="24" rx="2" />
+      <line x1="4" y1="36" x2="44" y2="36" />
+    </svg>
+  );
+}
 function DesktopIcon({ className = '' }) {
   return (
     <svg className={className} viewBox="0 0 48 48" fill="none" stroke="currentColor" strokeWidth="1.5">
       <rect x="6" y="6" width="36" height="28" rx="2" />
-      <circle cx="24" cy="20" r="2" />
-      <line x1="20" y1="34" x2="28" y2="34" />
       <line x1="24" y1="34" x2="24" y2="42" />
       <line x1="16" y1="42" x2="32" y2="42" />
     </svg>
   );
 }
-
 function DeviceIcon({ type, className = '' }) {
   switch (type) {
     case 'android': case 'ios': case 'phone': return <PhoneIcon className={className} />;
@@ -59,285 +153,129 @@ function DeviceIcon({ type, className = '' }) {
   }
 }
 
+// ═══════════════════════════════════════════════════
+//  MAIN APP
+// ═══════════════════════════════════════════════════
 function App() {
-  const [identity, setIdentity] = useState({ id: '', name: 'Loading...' });
+  const [identity, setIdentity] = useState({ id: '', name: 'Starting...', type: 'desktop' });
   const [peers, setPeers] = useState([]);
   const [files, setFiles] = useState([]);
   const [activeTab, setActiveTab] = useState('radar');
-  const [uploadingTo, setUploadingTo] = useState(null);
-  const [uploadProgress, setUploadProgress] = useState(0);
-  const [uploadingFile, setUploadingFile] = useState('');
-  const [statusMsg, setStatusMsg] = useState({ text: '', type: '' });
-  const [selectedPeerTarget, setSelectedPeerTarget] = useState(null);
-
+  const [statusMsg, setStatusMsg] = useState('');
   const fileInputRef = useRef(null);
-  const [mirroringPeer, setMirroringPeer] = useState(null);
-  const [remoteStream, setRemoteStream] = useState(null);
-  const peerConnectionRef = useRef(null);
-  const dataChannelRef = useRef(null);
-  const videoRef = useRef(null);
 
   useEffect(() => {
-    fetch(`${API_URL}/api/identity`)
-      .then(r => r.json())
-      .then(data => setIdentity(data && typeof data === 'object' ? data : { id: '', name: 'Device' }))
-      .catch(() => { });
-    fetchFiles();
-    socket.on('files_updated', () => { fetchFiles(); setStatusMsg({ text: 'New file received!', type: 'success' }); });
-    
-    // WebRTC Signaling Listener
-    socket.on('webrtc_signal_forward', async (data) => {
-      if (data.to !== identity.id && data.to !== 'desktop') return;
-      
-      if (data.type === 'offer') {
-        const pc = createPeerConnection();
-        await pc.setRemoteDescription(new RTCSessionDescription({ sdp: data.sdp, type: 'offer' }));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socket.emit('webrtc_signal', { to: data.fromId, type: 'answer', sdp: answer.sdp });
-      } else if (data.type === 'candidate') {
-        if (peerConnectionRef.current) {
-          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-        }
-      }
+    bridge.connect().then(async () => {
+      const id = await bridge.getIdentity();
+      if (id) setIdentity(id);
     });
 
-    return () => {
-      socket.off('files_updated');
-      socket.off('webrtc_signal_forward');
-    };
-  }, [identity.id]);
-
-  const createPeerConnection = () => {
-    const pc = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+    bridge.on('peers', (newPeers) => {
+      setPeers(Array.isArray(newPeers) ? newPeers : []);
     });
 
-    pc.onicecandidate = (event) => {
-      if (event.candidate) {
-        socket.emit('webrtc_signal', { to: mirroringPeer?.id || 'mobile', type: 'candidate', candidate: event.candidate });
-      }
+    // Initial load + polling
+    const fetchData = async () => {
+      try {
+        const p = await bridge.getPeers();
+        if (Array.isArray(p)) setPeers(p);
+      } catch {}
+      try {
+        const f = await bridge.listFiles();
+        if (Array.isArray(f)) setFiles(f);
+      } catch {}
     };
-
-    pc.ontrack = (event) => {
-      setRemoteStream(event.streams[0]);
-    };
-
-    pc.ondatachannel = (event) => {
-      dataChannelRef.current = event.channel;
-    };
-
-    peerConnectionRef.current = pc;
-    return pc;
-  };
-
-  const stopMirroring = () => {
-    peerConnectionRef.current?.close();
-    peerConnectionRef.current = null;
-    dataChannelRef.current = null;
-    setRemoteStream(null);
-    setMirroringPeer(null);
-  };
-
-  const handleRemoteClick = (e) => {
-    if (!dataChannelRef.current || !videoRef.current) return;
-    const rect = videoRef.current.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 1080; // Assuming 1080p target
-    const y = ((e.clientY - rect.top) / rect.height) * 1920; // Assuming 1920p target
-    dataChannelRef.current.send(`tap:${x},${y}`);
-  };
-
-  useEffect(() => {
-    const fetchPeers = () => fetch(`${API_URL}/api/peers`)
-      .then(r => r.json())
-      .then(data => setPeers(Array.isArray(data) ? data : []))
-      .catch(() => setPeers([]));
-    fetchPeers();
-    const interval = setInterval(fetchPeers, 3000);
+    fetchData();
+    const interval = setInterval(fetchData, 3000);
     return () => clearInterval(interval);
   }, []);
 
-  const fetchFiles = () => fetch(`${API_URL}/api/files`)
-    .then(r => r.json())
-    .then(data => setFiles(Array.isArray(data) ? data : []))
-    .catch(() => setFiles([]));
-
-  const handleDropOnPeer = async (e, peer) => {
-    e.preventDefault();
-    if (uploadingTo) return;
-    const selected = [];
-    if (e.dataTransfer?.items) {
-      const promises = [];
-      for (let i = 0; i < e.dataTransfer.items.length; i++) {
-        const item = e.dataTransfer.items[i];
-        if (item.kind === 'file') {
-          const entry = item.webkitGetAsEntry();
-          if (entry) promises.push(traverseFileTree(entry, '', selected));
-        }
-      }
-      await Promise.all(promises);
-    } else if (e.dataTransfer) {
-      selected.push(...Array.from(e.dataTransfer.files));
-    }
-    if (selected.length > 0) initiateTransfer(selected, peer);
+  const sendControl = (peerId, action, payload) => {
+    bridge.sendCommand(peerId, 'control', action, payload);
+    setStatusMsg(`Sent ${action} to ${peerId.substring(0, 8)}...`);
   };
 
-  const traverseFileTree = (item, path, fileList) => new Promise((resolve) => {
-    if (item.isFile) {
-      item.file((file) => { fileList.push(file); resolve(); });
-    } else if (item.isDirectory) {
-      item.createReader().readEntries(async (entries) => {
-        await Promise.all(entries.map(e => traverseFileTree(e, path + item.name + '/', fileList)));
-        resolve();
-      });
-    }
-  });
-
-  const initiateTransfer = (selectedFiles, peer) => {
-    const filesArray = Array.from(selectedFiles);
-    setUploadingTo(peer.id);
-    setUploadProgress(0);
-    setUploadingFile(filesArray[0]?.name || 'file');
-    setStatusMsg({ text: '', type: '' });
-
-    socket.emit('transfer_request', {
-      fromId: identity.id, fromName: identity.name, toId: peer.id,
-      filesCount: filesArray.length, totalSize: filesArray.reduce((a, f) => a + f.size, 0)
-    }, (response) => {
-      if (response?.status === 'accepted') {
-        pushFiles(filesArray, peer, response.transferId);
-      } else {
-        setStatusMsg({ text: `${peer.name} rejected the transfer`, type: 'error' });
-        setUploadingTo(null);
-      }
-    });
-  };
-
-  const pushFiles = (filesArray, peer, transferId) => {
-    const formData = new FormData();
-    filesArray.forEach(f => formData.append('files', f));
-    const xhr = new XMLHttpRequest();
-    xhr.upload.addEventListener("progress", (e) => { if (e.lengthComputable) setUploadProgress(Math.round((e.loaded / e.total) * 100)); });
-    xhr.addEventListener("load", () => { setStatusMsg({ text: `Sent ${filesArray.length} file(s) to ${peer.name}`, type: 'success' }); setUploadingTo(null); });
-    xhr.addEventListener("error", () => { setStatusMsg({ text: 'Transfer failed', type: 'error' }); setUploadingTo(null); });
-    xhr.open("POST", `http://${peer.ip}:${peer.port}/api/p2p/upload`);
-    xhr.setRequestHeader('x-transfer-id', transferId);
-    xhr.send(formData);
-  };
-
-  const deleteFile = (path) => fetch(`${API_URL}/api/files?path=${encodeURIComponent(path)}`, { method: 'DELETE' }).then(fetchFiles);
-  const downloadFile = (path, name) => { const a = document.createElement('a'); a.href = `${API_URL}/api/download?path=${encodeURIComponent(path)}`; a.download = name; document.body.appendChild(a); a.click(); a.remove(); };
-
-  // ─── RENDER ──────────────────────────────────────────
+  // ─── RENDER ──────────────────────────────────────
   return (
     <div className="min-h-screen bg-wash flex flex-col font-sans">
-      <div id="boot-marker" className="hidden">BOOTED</div>
 
-      {/* ═══ TOP BAR ═══ matching radar_main / history_log templates */}
+      {/* ═══ TOP BAR ═══ */}
       <header className="bg-canvas border-b border-black flex items-center justify-between h-14 px-6">
         <div className="flex items-center gap-2.5">
           <span className="material-symbols-outlined text-xl">wifi_tethering</span>
-          <h1 className="font-heading font-bold text-lg tracking-tight">Notion Canvas</h1>
+          <h1 className="font-heading font-bold text-lg tracking-tight">AntahkarnVrinda</h1>
+          <span className="mono text-[9px] bg-black text-white px-1.5 py-0.5 rounded-sm font-bold ml-2">v2.0 AGENT</span>
         </div>
         <nav className="hidden md:flex items-center gap-8 h-full">
-          <button onClick={() => setActiveTab('radar')} className={activeTab === 'radar' ? 'nav-link-active h-full flex items-center' : 'nav-link h-full flex items-center'}>Radar</button>
-          <button onClick={() => setActiveTab('shared')} className={activeTab === 'shared' ? 'nav-link-active h-full flex items-center' : 'nav-link h-full flex items-center'}>Shared</button>
-          <button onClick={() => setActiveTab('history')} className={activeTab === 'history' ? 'nav-link-active h-full flex items-center' : 'nav-link h-full flex items-center'}>History</button>
-          <button onClick={() => setActiveTab('settings')} className={activeTab === 'settings' ? 'nav-link-active h-full flex items-center' : 'nav-link h-full flex items-center'}>Settings</button>
+          {['radar', 'shared', 'history', 'settings'].map(tab => (
+            <button key={tab} onClick={() => setActiveTab(tab)}
+              className={activeTab === tab ? 'nav-link-active h-full flex items-center' : 'nav-link h-full flex items-center'}>
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </button>
+          ))}
         </nav>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2 border border-black rounded-card px-3 py-1.5">
-            <span className="w-2 h-2 rounded-full bg-green-500" />
-            <span className="mono text-[11px] font-bold">{identity.name}</span>
-          </div>
+        <div className="flex items-center gap-2 border border-black rounded-card px-3 py-1.5">
+          <span className="w-2 h-2 rounded-full bg-green-500" />
+          <span className="mono text-[11px] font-bold">{identity.name}</span>
         </div>
       </header>
 
-      {/* ═══ MAIN ═══ */}
+      {/* ═══ MAIN CONTENT ═══ */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-6 md:p-10">
 
-        {/* ─── RADAR TAB ─── matches radar_main.png */}
+        {/* ─── RADAR TAB ─── */}
         {activeTab === 'radar' && (
           <div className="flex flex-col gap-8">
-
-            {/* Sub-header: This Device + Connection Status */}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2 border border-black rounded-card px-4 py-2 bg-canvas">
                 <span className="w-2 h-2 rounded-full bg-green-500" />
-                <span className="text-sm">This Device: <strong className="font-heading">{identity.name}</strong></span>
+                <span className="text-sm">Agent: <strong className="font-heading">{identity.name}</strong></span>
               </div>
               <div className="flex items-center gap-2 bg-black text-white px-5 py-2 rounded-card">
                 <span className="material-symbols-outlined text-sm">check_circle</span>
-                <span className="text-sm font-medium">Connected to Local Mesh</span>
+                <span className="text-sm font-medium">Unified Mesh Active</span>
               </div>
             </div>
 
-            {/* Device Grid Area - dashed border like radar_main */}
-            <div className="border-2 border-dashed border-black/20 rounded-card bg-canvas min-h-[400px] md:min-h-[500px] p-4 md:p-8 flex flex-col select-none overflow-hidden">
-
+            <div className="border-2 border-dashed border-black/20 rounded-card bg-canvas min-h-[400px] md:min-h-[500px] p-4 md:p-8 flex flex-col">
               {peers.length === 0 ? (
                 <div className="flex-1 flex flex-col items-center justify-center text-center gap-4">
                   <span className="material-symbols-outlined text-6xl text-black/10">wifi_tethering</span>
                   <div>
                     <h3 className="font-heading text-2xl font-bold tracking-tight mb-1">SCANNING...</h3>
-                    <p className="mono text-xs text-black/40 uppercase tracking-widest">Searching for nearby nodes</p>
+                    <p className="mono text-xs text-black/40 uppercase tracking-widest">Searching for agent nodes on network</p>
                   </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6 flex-1 content-center">
-                  {Array.isArray(peers) && peers.map(peer => {
-                    const isUploading = uploadingTo === peer.id;
-                    return (
-                      <div
-                        key={peer.id}
-                        onDragOver={e => e.preventDefault()}
-                        onDrop={e => handleDropOnPeer(e, peer)}
-                        onClick={() => { if (!isUploading) { setSelectedPeerTarget(peer); fileInputRef.current?.click(); } }}
-                        className="peer-card flex flex-col items-center text-center min-h-[200px] justify-center gap-3 cursor-pointer group"
-                      >
-                        {isUploading ? (
-                          <>
-                            {/* Transfer state matching transfer_state_active */}
-                            <h4 className="font-heading font-bold text-lg">{peer.name}</h4>
-                            <p className="mono text-[10px] text-black/40">{peer.ip}</p>
-                            {/* Circular progress */}
-                            <div className="relative w-24 h-24 my-2">
-                              <svg className="w-24 h-24 -rotate-90" viewBox="0 0 100 100">
-                                <circle cx="50" cy="50" r="42" fill="none" stroke="#F7F7F5" strokeWidth="8" />
-                                <circle cx="50" cy="50" r="42" fill="none" stroke="#000" strokeWidth="8"
-                                  strokeDasharray={`${2 * Math.PI * 42}`}
-                                  strokeDashoffset={`${2 * Math.PI * 42 * (1 - uploadProgress / 100)}`}
-                                  strokeLinecap="butt" className="transition-all duration-300" />
-                              </svg>
-                              <div className="absolute inset-0 flex flex-col items-center justify-center">
-                                <span className="material-symbols-outlined text-lg">upload</span>
-                                <span className="font-heading font-bold text-lg">{uploadProgress}%</span>
-                              </div>
-                            </div>
-                            <p className="font-heading font-bold text-sm">Sending...</p>
-                            <p className="mono text-[10px] text-black/40 truncate max-w-full">{uploadingFile}</p>
-                          </>
-                        ) : (
-                          <>
-                            <DeviceIcon type={peer.type} className="w-12 h-12 text-black/70 group-hover:text-black transition-colors" />
-                            <div className="flex flex-col gap-1">
-                              <h4 className="font-heading font-bold text-lg leading-tight">{peer.name}</h4>
-                              <p className="mono text-[10px] text-black/50 uppercase tracking-wide">{(peer.subtitle || 'Nearby Device')}</p>
-                            </div>
-                            <div className="flex flex-col items-center gap-2">
-                              <div className="border border-black/10 px-2 py-0.5 rounded-sm bg-wash mono text-[8px] font-bold text-black/40">
-                                {(peer.type || 'DESKTOP').toUpperCase()}
-                              </div>
-                              <div className="status-badge text-green-600">
-                                <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> ONLINE
-                              </div>
-                            </div>
-                          </>
-                        )}
+                  {peers.map(peer => (
+                    <div key={peer.id} className="peer-card flex flex-col items-center text-center min-h-[200px] justify-center gap-3 cursor-pointer group">
+                      <DeviceIcon type={peer.type} className="w-12 h-12 text-black/70 group-hover:text-black transition-colors" />
+                      <div className="flex flex-col gap-1">
+                        <h4 className="font-heading font-bold text-lg leading-tight">{peer.name}</h4>
+                        <p className="mono text-[10px] text-black/50 uppercase tracking-wide">{peer.type || 'device'}</p>
                       </div>
-                    );
-                  })}
-                  {/* Discovering placeholder card */}
+                      <div className="flex flex-col items-center gap-2">
+                        <div className="status-badge text-green-600">
+                          <span className="w-1.5 h-1.5 rounded-full bg-green-500" /> {peer.connected ? 'CONNECTED' : 'DISCOVERED'}
+                        </div>
+                        <div className="flex gap-2 mt-2">
+                          <button onClick={() => sendControl(peer.id, 'tap', { x: 540, y: 960 })}
+                            className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors">
+                            TAP
+                          </button>
+                          <button onClick={() => bridge.sendCommand(peer.id, 'mirror', 'start', { quality: 'high' })}
+                            className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors">
+                            MIRROR
+                          </button>
+                          <button onClick={() => bridge.sendCommand(peer.id, 'file', 'list', {})}
+                            className="text-[10px] mono border border-black px-2 py-1 hover:bg-black hover:text-white transition-colors">
+                            FILES
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                   <div className="border border-dashed border-black/20 rounded-card flex flex-col items-center justify-center min-h-[200px] text-black/30">
                     <span className="material-symbols-outlined text-3xl text-accent/50 mb-2">cell_tower</span>
                     <span className="mono text-xs text-accent/70 font-medium">Discovering...</span>
@@ -346,31 +284,24 @@ function App() {
               )}
             </div>
 
-            {/* Status Bar - bottom row like radar_main */}
-            <div className="flex items-center justify-between border-t border-black/10 pt-4 mt-auto">
+            <div className="flex items-center justify-between border-t border-black/10 pt-4">
               <div className="flex items-center gap-2 text-black/60">
                 <span className="material-symbols-outlined text-sm">schedule</span>
-                {statusMsg.text ? (
-                  <span className="mono text-[11px] flex items-center gap-1.5">
-                    14:02 {statusMsg.type === 'success' ? 'Sent' : 'Error'}
-                    <span className="px-1.5 py-0.5 bg-black/5 border border-black/10 rounded-sm font-mono text-[10px]">{uploadingFile || 'file'}</span>
-                    to {peers.find(p => p.id === uploadingTo)?.name || 'device'}
-                  </span>
-                ) : (
-                  <span className="mono text-[11px]">Ready</span>
-                )}
+                <span className="mono text-[11px]">{statusMsg || 'Ready'}</span>
               </div>
               <div className="flex items-center gap-3">
                 <div className="w-32 h-1.5 bg-black/5 rounded-full overflow-hidden">
-                  <div className="h-full bg-green-500 rounded-full transition-all duration-1000" style={{ width: '100%' }} />
+                  <div className="h-full bg-green-500 rounded-full" style={{ width: '100%' }} />
                 </div>
-                <span className="mono text-[10px] text-black/40 font-bold uppercase tracking-widest">Idle</span>
+                <span className="mono text-[10px] text-black/40 font-bold uppercase tracking-widest">
+                  {peers.length > 0 ? `${peers.length} PEERS` : 'IDLE'}
+                </span>
               </div>
             </div>
           </div>
         )}
 
-        {/* ─── HISTORY TAB ─── matches history_log.png */}
+        {/* ─── HISTORY TAB ─── */}
         {activeTab === 'history' && (
           <div>
             <div className="flex items-center justify-between mb-8">
@@ -378,56 +309,37 @@ function App() {
                 <h2 className="font-heading text-4xl md:text-5xl font-bold tracking-tight">Transfer History</h2>
                 <p className="mono text-xs text-black/40 uppercase mt-2">Total: {Array.isArray(files) ? files.length : 0} files</p>
               </div>
-              <div className="flex gap-3">
-                <button className="primary-button text-xs">Filter</button>
-                <button className="primary-button-filled text-xs flex items-center gap-2">
-                  <span className="material-symbols-outlined text-sm">ios_share</span> Export Log
-                </button>
-              </div>
+              <button className="primary-button-filled text-xs flex items-center gap-2">
+                <span className="material-symbols-outlined text-sm">ios_share</span> Export Log
+              </button>
             </div>
 
-            {/* Table wrapper with horizontal scroll for small windows */}
-            <div className="border-t-2 border-black overflow-x-auto -mx-6 px-6 md:mx-0 md:px-0">
+            <div className="border-t-2 border-black overflow-x-auto">
               <div className="min-w-[600px]">
-                <div className="grid grid-cols-[100px_1fr_100px_140px_80px] gap-4 py-3 border-b border-black/10">
+                <div className="grid grid-cols-[100px_1fr_100px_80px] gap-4 py-3 border-b border-black/10">
                   <span className="mono text-[10px] font-bold uppercase tracking-widest text-black/50">Date</span>
                   <span className="mono text-[10px] font-bold uppercase tracking-widest text-black/50">File Name</span>
-                  <span className="mono text-[10px] font-bold uppercase tracking-widest text-black/50">Direction</span>
-                  <span className="mono text-[10px] font-bold uppercase tracking-widest text-black/50">Peer</span>
+                  <span className="mono text-[10px] font-bold uppercase tracking-widest text-black/50">Type</span>
                   <span className="mono text-[10px] font-bold uppercase tracking-widest text-black/50 text-right">Size</span>
                 </div>
 
                 {(!Array.isArray(files) || files.length === 0) ? (
                   <div className="py-16 text-center">
                     <span className="material-symbols-outlined text-4xl text-black/10 mb-3 block">folder_open</span>
-                    <p className="text-black/30 text-sm">No transfer history yet</p>
+                    <p className="text-black/30 text-sm">No transfers yet. Files received from peers will appear here.</p>
                   </div>
                 ) : (
                   files.map((file) => (
-                    <div key={file?.id || Math.random()} className="grid grid-cols-[100px_1fr_100px_140px_80px] gap-4 py-4 border-b border-black/5 hover:bg-wash transition-colors group items-center">
+                    <div key={file?.id || file?.name || Math.random()} className="grid grid-cols-[100px_1fr_100px_80px] gap-4 py-4 border-b border-black/5 hover:bg-wash transition-colors group items-center">
                       <span className="mono text-xs text-black/40">
                         {file?.lastModified ? new Date(file.lastModified).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : '---'}
                       </span>
                       <div className="flex items-center gap-2 min-w-0">
                         <span className="material-symbols-outlined text-sm text-black/40">description</span>
-                        <span className="font-medium text-sm truncate">{file.name}</span>
+                        <span className="font-medium text-sm truncate">{file?.name || 'Unknown'}</span>
                       </div>
-                      <div className="flex items-center gap-1.5">
-                        <span className="material-symbols-outlined text-sm text-green-600">south_west</span>
-                        <span className="mono text-[10px] font-bold uppercase text-green-600">Received</span>
-                      </div>
-                      <span className="text-sm text-black/60">Local</span>
-                      <div className="flex items-center justify-end gap-2">
-                        <span className="mono text-xs text-black/60 text-right">{formatBytes(file.size)}</span>
-                        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <button onClick={() => downloadFile(file.path, file.name)} className="p-1 hover:bg-black hover:text-white rounded transition-colors" title="Download">
-                            <span className="material-symbols-outlined text-sm">download</span>
-                          </button>
-                          <button onClick={() => deleteFile(file.path)} className="p-1 hover:bg-accent hover:text-white rounded transition-colors" title="Delete">
-                            <span className="material-symbols-outlined text-sm">delete</span>
-                          </button>
-                        </div>
-                      </div>
+                      <span className="mono text-[10px] text-black/50">{file?.isDir ? 'DIR' : 'FILE'}</span>
+                      <span className="mono text-xs text-black/60 text-right">{formatBytes(file?.size || 0)}</span>
                     </div>
                   ))
                 )}
@@ -436,7 +348,7 @@ function App() {
           </div>
         )}
 
-        {/* ─── SHARED TAB ─── matches desktop_shared_files_section.png */}
+        {/* ─── SHARED TAB ─── */}
         {activeTab === 'shared' && (
           <div className="flex flex-col gap-10">
             <div className="flex items-end justify-between">
@@ -444,12 +356,8 @@ function App() {
                 <h2 className="font-heading text-6xl font-bold tracking-tighter leading-none">SHARED</h2>
                 <p className="text-black/40 font-medium text-lg">Active peer-to-peer file distribution.</p>
               </div>
-              <button
-                onClick={() => { setSelectedPeerTarget(peers[0] || null); fileInputRef.current?.click(); }}
-                className="share-btn"
-              >
-                <span className="material-symbols-outlined">add</span>
-                Share New File
+              <button className="share-btn">
+                <span className="material-symbols-outlined">add</span> Share New File
               </button>
             </div>
 
@@ -465,20 +373,18 @@ function App() {
                 </thead>
                 <tbody>
                   {[
-                    { name: 'Project_Alpha_Final_v2.pdf', size: '4.2 MB / PDF', peer: 'alex.grotesk', status: 'ACTIVE' },
-                    { name: 'Brand_Identity_System.fig', size: '12.8 MB / FIG', peer: 'maria.design', status: 'ACTIVE' },
-                    { name: 'Q4_Market_Analysis.xlsx', size: '1.1 MB / XLSX', peer: 'finance_core', status: 'INACTIVE' },
-                    { name: 'Security_Protocol_2024.txt', size: '15 KB / TXT', peer: 'admin.node', status: 'ACTIVE' },
-                    { name: 'User_Feedback_Raw_Audio.wav', size: '84.5 MB / WAV', peer: 'research_dept', status: 'ACTIVE' },
+                    { name: 'Project_Alpha_Final_v2.pdf', size: '4.2 MB / PDF', peer: 'Pixel 9 Pro', status: 'ACTIVE' },
+                    { name: 'Brand_Identity_System.fig', size: '12.8 MB / FIG', peer: 'MacBook Studio', status: 'ACTIVE' },
+                    { name: 'Q4_Market_Analysis.xlsx', size: '1.1 MB / XLSX', peer: 'iPhone 15', status: 'INACTIVE' },
                   ].map((item, i) => (
                     <tr key={i} className="group hover:bg-wash transition-colors">
                       <td className="font-bold text-sm tracking-tight">{item.name}</td>
                       <td className="mono text-[11px] text-black/50">{item.size}</td>
                       <td className="text-sm font-medium">{item.peer}</td>
-                      <td className="status-badge">
+                      <td>
                         <div className="flex items-center gap-2">
                           <span className={`w-1.5 h-1.5 rounded-full ${item.status === 'ACTIVE' ? 'bg-black' : 'border border-black'}`} />
-                          <span className={`${item.status === 'ACTIVE' ? 'text-black' : 'text-black/30'}`}>{item.status}</span>
+                          <span className={item.status === 'ACTIVE' ? 'text-black' : 'text-black/30'}>{item.status}</span>
                         </div>
                       </td>
                     </tr>
@@ -486,62 +392,39 @@ function App() {
                 </tbody>
               </table>
             </div>
-
-            <div className="flex items-center justify-between border-t border-black/10 pt-6">
-              <p className="mono text-[10px] text-black/30 uppercase tracking-[0.1em]">Showing 1-5 of 24 shared items</p>
-              <div className="flex items-center gap-2">
-                <button className="w-10 h-10 border-2 border-black flex items-center justify-center hover:bg-wash active:bg-black active:text-white transition-all">
-                  <span className="material-symbols-outlined text-base">chevron_left</span>
-                </button>
-                {[1, 2, 3].map(n => (
-                  <button key={n} className={`w-10 h-10 border-2 border-black font-bold mono text-xs transition-all ${n === 1 ? 'bg-black text-white' : 'hover:bg-wash'}`}>
-                    {n}
-                  </button>
-                ))}
-                <button className="w-10 h-10 border-2 border-black flex items-center justify-center hover:bg-wash active:bg-black active:text-white transition-all">
-                  <span className="material-symbols-outlined text-base">chevron_right</span>
-                </button>
-              </div>
-            </div>
           </div>
         )}
 
-        {/* ─── SETTINGS TAB ─── matches settings_modal.png */}
+        {/* ─── SETTINGS TAB ─── */}
         {activeTab === 'settings' && (
           <div className="max-w-lg mx-auto">
             <div className="border border-black rounded-card bg-canvas p-10">
-              <div className="flex items-center justify-between mb-10">
-                <h2 className="font-heading text-3xl font-bold">Settings</h2>
-              </div>
-
+              <h2 className="font-heading text-3xl font-bold mb-10">Agent Settings</h2>
               <div className="space-y-10">
+                <div>
+                  <span className="mono text-[10px] text-black/40 uppercase tracking-widest block mb-2">Device ID</span>
+                  <p className="font-heading text-sm font-bold text-black/60">{identity.id || 'loading...'}</p>
+                </div>
                 <div>
                   <span className="mono text-[10px] text-black/40 uppercase tracking-widest block mb-2">Broadcast Name</span>
                   <input type="text" className="underlined-input font-heading text-xl font-bold" defaultValue={identity.name} readOnly />
                 </div>
-
                 <div className="flex items-center justify-between">
                   <div>
                     <h4 className="font-bold text-base">Visible to others</h4>
-                    <p className="text-sm text-black/40 mt-0.5">Allow nearby devices to discover you</p>
+                    <p className="text-sm text-black/40 mt-0.5">Allow nearby agents to discover you</p>
                   </div>
                   <div className="w-12 h-7 border-2 border-black rounded-full relative cursor-pointer bg-black">
-                    <div className="absolute top-0.5 right-0.5 w-5 h-5 bg-white rounded-full transition-all" />
+                    <div className="absolute top-0.5 right-0.5 w-5 h-5 bg-white rounded-full" />
                   </div>
                 </div>
-
                 <div>
-                  <span className="mono text-[10px] text-black/40 uppercase tracking-widest block mb-3">Save Destination</span>
-                  <div className="flex items-center gap-3 border border-black rounded-card px-4 py-3">
-                    <span className="material-symbols-outlined text-black/40">folder</span>
-                    <span className="mono text-sm flex-1">~/Downloads/LocalShare</span>
-                    <button className="text-sm font-bold underline underline-offset-4">Change</button>
-                  </div>
+                  <span className="mono text-[10px] text-black/40 uppercase tracking-widest block mb-2">Architecture</span>
+                  <p className="mono text-xs text-black/50">Unified Agent v2.0 — WebSocket + mDNS</p>
                 </div>
-
-                <div className="flex items-center gap-4 pt-4">
-                  <button className="text-sm text-black/40 hover:text-black transition-colors">Cancel</button>
-                  <button className="primary-button-filled flex-1">Save Changes</button>
+                <div>
+                  <span className="mono text-[10px] text-black/40 uppercase tracking-widest block mb-2">Agent Port</span>
+                  <p className="mono text-xs text-black/50">8765</p>
                 </div>
               </div>
             </div>
@@ -549,80 +432,41 @@ function App() {
         )}
       </main>
 
-      {/* ═══ MOBILE BOTTOM NAV ═══ matches mobile_radar_view_variant_1_1 */}
+      {/* ═══ MOBILE BOTTOM NAV ═══ */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 border-t border-black bg-canvas flex items-center justify-around">
-        <button onClick={() => setActiveTab('radar')} className={`flex flex-col items-center gap-0.5 ${activeTab === 'radar' ? 'text-black' : 'text-black/30'}`}>
-          <span className="material-symbols-outlined">wifi_tethering</span>
-          <span className="mono text-[9px] font-bold uppercase">Radar</span>
-        </button>
-        <button onClick={() => setActiveTab('history')} className={`flex flex-col items-center gap-0.5 ${activeTab === 'history' ? 'text-black' : 'text-black/30'}`}>
-          <span className="material-symbols-outlined">folder</span>
-          <span className="mono text-[9px] font-bold uppercase">Files</span>
-        </button>
-        <button onClick={() => { setSelectedPeerTarget(peers[0] || null); fileInputRef.current?.click(); }} className="w-10 h-10 bg-black flex items-center justify-center text-white">
-          <span className="material-symbols-outlined">add</span>
-        </button>
-        <button onClick={() => setActiveTab('shared')} className={`flex flex-col items-center gap-0.5 ${activeTab === 'shared' ? 'text-black' : 'text-black/30'}`}>
-          <span className="material-symbols-outlined">group</span>
-          <span className="mono text-[9px] font-bold uppercase">Shared</span>
-        </button>
-        <button onClick={() => setActiveTab('settings')} className={`flex flex-col items-center gap-0.5 ${activeTab === 'settings' ? 'text-black' : 'text-black/30'}`}>
-          <span className="material-symbols-outlined">settings</span>
-          <span className="mono text-[9px] font-bold uppercase">Settings</span>
-        </button>
+        {[
+          { id: 'radar', icon: 'wifi_tethering', label: 'Radar' },
+          { id: 'history', icon: 'folder', label: 'Files' },
+          { id: 'shared', icon: 'group', label: 'Shared' },
+          { id: 'settings', icon: 'settings', label: 'Settings' },
+        ].map(tab => (
+          <button key={tab.id} onClick={() => setActiveTab(tab.id)}
+            className={`flex flex-col items-center gap-0.5 ${activeTab === tab.id ? 'text-black' : 'text-black/30'}`}>
+            <span className="material-symbols-outlined">{tab.icon}</span>
+            <span className="mono text-[9px] font-bold uppercase">{tab.label}</span>
+          </button>
+        ))}
       </nav>
 
-      {/* ═══ MIRRORING OVERLAY ═══ */}
-      {remoteStream && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-10 animate-in fade-in duration-300">
-          <div className="bg-canvas border-2 border-black rounded-card shadow-2xl overflow-hidden flex flex-col max-h-full">
-            <div className="h-12 bg-black text-white px-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className="material-symbols-outlined text-sm">visibility</span>
-                <span className="font-heading font-bold text-sm tracking-tight">{mirroringPeer?.name || 'Device'} Mirror</span>
-              </div>
-              <button onClick={stopMirroring} className="hover:bg-white/20 p-1 rounded transition-colors">
-                <span className="material-symbols-outlined">close</span>
-              </button>
-            </div>
-            <div className="relative bg-black flex-1 flex items-center justify-center overflow-hidden" 
-                 style={{ aspectRatio: '9/16', maxHeight: 'calc(90vh - 48px)' }}>
-              <video 
-                ref={videoRef}
-                autoPlay 
-                playsInline 
-                srcObject={remoteStream} 
-                onClick={handleRemoteClick}
-                className="max-w-full max-h-full cursor-crosshair"
-              />
-              <div className="absolute bottom-4 left-4 right-4 flex justify-between items-center opacity-0 hover:opacity-100 transition-opacity">
-                <div className="bg-black/50 backdrop-blur px-3 py-1 rounded-full text-white mono text-[10px] font-bold">
-                  CONTROL ACTIVE
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Hidden file input */}
-      <input type="file" multiple className="hidden" ref={fileInputRef} onChange={(e) => {
-        if (selectedPeerTarget && e.target.files?.length) { initiateTransfer(e.target.files, selectedPeerTarget); setSelectedPeerTarget(null); }
-      }} />
+      <input type="file" multiple className="hidden" ref={fileInputRef} />
     </div>
   );
 }
 
+// ═══ ERROR BOUNDARY ═══
 class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { hasError: false, error: null }; }
   static getDerivedStateFromError(error) { return { hasError: true, error }; }
   render() {
     if (this.state.hasError) {
       return (
-        <div className="p-20 text-center font-mono">
-          <h1 className="text-2xl font-bold mb-4">ENGINE DISTURBANCE DETECTED</h1>
-          <p className="text-red-600 mb-4">{this.state.error?.message}</p>
-          <button onClick={() => window.location.reload()} className="px-4 py-2 bg-black text-white rounded">REBOOT SYSTEM</button>
+        <div style={{ padding: '80px 20px', textAlign: 'center', fontFamily: 'monospace' }}>
+          <h1 style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '16px' }}>AGENT ERROR</h1>
+          <p style={{ color: '#dc2626', marginBottom: '16px' }}>{this.state.error?.message}</p>
+          <button onClick={() => window.location.reload()}
+            style={{ padding: '8px 24px', background: '#000', color: '#fff', border: 'none', cursor: 'pointer' }}>
+            REBOOT
+          </button>
         </div>
       );
     }
